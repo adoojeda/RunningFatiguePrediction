@@ -1,0 +1,48 @@
+# ============================================
+# RunningFatiguePrediction - .gitignore
+# ============================================
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.egg-info/
+*.egg
+.DS_Store
+.env
+.venv/
+.conda/
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.code-workspace
+
+# Data folders to ignore
+data/raw/*
+data/processed/*
+data/results/*
+
+# Except specific important files in data/results
+!data/results/rpe_file_mapping.csv
+!data/results/features_dataset_5s_50olap.parquet
+!data/results/eda_figures/
+!data/results/eda_figures/*.png
+!data/results/eda_figures/*.csv
+
+# Machine learning
+models/
+*.h5
+*.pkl
+*.joblib
+*.sav
+
+# Documents and temporary files
+*.pdf
+*.docx
+*.zip
+notes/
+temp/
