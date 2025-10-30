@@ -3,7 +3,7 @@ Running signal data preprocessing:
 - Data cleaning (filtering physical and physiological outliers).
 - Limited interpolation of HR and SpO2.
 - Keep all useful columns (gravity, rotation, orientation) for future biomechanics analysis or models.
-- Drop only the absolute timestamp column (`Tiempo`).
+- Drop only the absolute timestamp column.
 
 Saves the preprocessed data in Parquet format under data/processed/.
 """
@@ -54,13 +54,11 @@ def _estimate_fs(t: pd.Series) -> float:
     dt_med = np.median(dt)
     return np.nan if dt_med <= 0 or not np.isfinite(dt_med) else 1.0 / dt_med
 
-
 def _interp_limit_from_seconds(fs_est: float, seconds: float) -> int:
     """Convert a time threshold (s) into the number of consecutive samples to interpolate."""
     if not np.isfinite(fs_est) or fs_est <= 0:
         return 5
     return max(1, int(round(fs_est * seconds)))
-
 
 # ======================================================================
 # MAIN PREPROCESSING
@@ -81,7 +79,7 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
 
         # Assign expected column names
         df.columns = [
-            "Tiempo", "AccX", "AccY", "AccZ",
+            "Time", "AccX", "AccY", "AccZ",
             "GravX", "GravY", "GravZ",
             "RotX", "RotY", "RotZ",
             "Roll", "Pitch", "Yaw",
@@ -89,15 +87,15 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
         ]
 
         # Relative time
-        df["Tiempo"] = pd.to_numeric(df["Tiempo"], errors="coerce")
-        df = df.dropna(subset=["Tiempo"]).reset_index(drop=True)
-        df["Tiempo_rel"] = df["Tiempo"] - df["Tiempo"].iloc[0]
+        df["Time"] = pd.to_numeric(df["Time"], errors="coerce")
+        df = df.dropna(subset=["Time"]).reset_index(drop=True)
+        df["Relative_Time"] = df["Time"] - df["Time"].iloc[0]
 
         # Drop the absolute timestamp column
-        df.drop(columns=["Tiempo"], inplace=True, errors="ignore")
+        df.drop(columns=["Time"], inplace=True, errors="ignore")
 
         # Estimate sampling frequency
-        fs_est = _estimate_fs(df["Tiempo_rel"])
+        fs_est = _estimate_fs(df["Relative_Time"])
         interp_limit = _interp_limit_from_seconds(fs_est, INTERP_MAX_GAP_SEC)
 
         # Ensure numeric types
@@ -121,12 +119,15 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
         mask_acc = (df[["AccX", "AccY", "AccZ"]].abs().max(axis=1) < ACC_MAX)
         df = df[mask_acc].reset_index(drop=True)
 
+        # Ensure Relative_Time is the leading column in the output
+        ordered_columns = ["Relative_Time"] + [col for col in df.columns if col != "Relative_Time"]
+        df = df[ordered_columns]
+
         return df
 
     except Exception as e:
         logging.error(f"Error preprocessing {os.path.basename(filepath)}: {e}", exc_info=True)
         return None
-
 
 def process_file(filepath: str) -> Optional[str]:
     """Process a complete file and save it as Parquet."""
@@ -144,7 +145,6 @@ def process_file(filepath: str) -> Optional[str]:
     except Exception as e:
         logging.error(f"Error processing file {filepath}: {e}", exc_info=True)
         return None
-
 
 def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
     """Preprocess all CSV files located in data/raw/."""
@@ -184,7 +184,6 @@ def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
 
     logging.info(f"🧾 Metadata saved to: {metadata_path}")
     return processed_files
-
 
 # ======================================================================
 # MAIN EXECUTION
