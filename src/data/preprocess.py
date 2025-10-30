@@ -2,7 +2,6 @@
 Running signal data preprocessing:
 - Data cleaning (filtering physical and physiological outliers).
 - Limited interpolation of HR and SpO2.
-- Compute centered accelerations and magnitudes.
 - Keep all useful columns (gravity, rotation, orientation) for future biomechanics analysis or models.
 - Drop only the absolute timestamp column (`Tiempo`).
 
@@ -121,14 +120,6 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
         # Remove acceleration outliers
         mask_acc = (df[["AccX", "AccY", "AccZ"]].abs().max(axis=1) < ACC_MAX)
         df = df[mask_acc].reset_index(drop=True)
-
-        # Center accelerations and compute magnitudes
-        df["AccX_centered"] = df["AccX"] - df["AccX"].mean()
-        df["AccY_centered"] = df["AccY"] - df["AccY"].mean()
-        df["AccZ_centered"] = df["AccZ"] - df["AccZ"].mean()
-
-        df["Acc_mag"] = np.sqrt(df["AccX"]**2 + df["AccY"]**2 + df["AccZ"]**2)
-        df["Acc_dyn_mag"] = np.sqrt(df["AccX_centered"]**2 + df["AccY_centered"]**2 + df["AccZ_centered"]**2)
 
         return df
 
