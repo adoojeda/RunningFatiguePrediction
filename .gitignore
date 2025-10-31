@@ -24,6 +24,7 @@ __pycache__/
 # Data folders to ignore
 data/raw/*
 data/processed/*
+data/enriched/*
 data/results/*
 
 # Except specific important files in data/results
