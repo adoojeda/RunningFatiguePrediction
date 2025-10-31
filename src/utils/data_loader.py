@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import lru_cache
 from typing import List, Optional
 
 import numpy as np
@@ -42,14 +43,44 @@ ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
 DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset_5s_50olap.parquet")
 
+
+def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = None) -> List[str]:
+    """Return possible file paths inside *directory* derived from *name* and optional prefixes."""
+    if os.path.isabs(name):
+        return [name]
+
+    filename = name if name.endswith(".parquet") else f"{name}.parquet"
+    candidates = [os.path.join(directory, filename)]
+    for prefix in prefixes or []:
+        prefixed = filename if filename.startswith(prefix) else f"{prefix}{filename}"
+        candidates.append(os.path.join(directory, prefixed))
+
+    # Preserve order while removing duplicates
+    seen = set()
+    unique_candidates = []
+    for path in candidates:
+        if path not in seen:
+            seen.add(path)
+            unique_candidates.append(path)
+    return unique_candidates
+
 # ======================================================================
 # CORE LOADERS
 # ======================================================================
+@lru_cache(maxsize=64)
 def load_data(file_path: str) -> Optional[pd.DataFrame]:
     """
     Load a processed or enriched file (parquet/csv) and ensure temporal consistency.
 
-    Returns a DataFrame with a `Second` column derived from `Relative_Time`.
+    Returns
+    -------
+    Optional[pandas.DataFrame]
+        DataFrame containing at least:
+            * `Relative_Time` (float seconds) or `Time`
+            * inertial sensors (`Acc*`, `Grav*`, `Rot*`, `Roll`, `Pitch`, `Yaw`)
+            * physiological channels (`FC`, `SpO2`)
+            * helper column `Second`
+        Returns None if the file cannot be read or is empty.
     """
     try:
         if not os.path.exists(file_path):
@@ -81,11 +112,67 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
         logger.error("❌ Error loading %s: %s", file_path, exc, exc_info=True)
         return None
 
+
+@lru_cache(maxsize=64)
+def load_enriched_session(name: str, *, fallback_to_processed: bool = True) -> Optional[pd.DataFrame]:
+    """
+    Load a single session from `data/enriched/`.
+
+    Parameters
+    ----------
+    name:
+        File name (with or without `.parquet` / `enriched_` prefix) or absolute path.
+    fallback_to_processed:
+        When True, attempt to load the corresponding `clean_*.parquet` from `data/processed/`
+        if the enriched file is missing.
+
+    Returns
+    -------
+    Optional[pandas.DataFrame]
+        DataFrame with the same column guarantees as `load_data`. Returns None if the
+        session cannot be located.
+    """
+
+    for candidate in _candidate_paths(name, ENRICHED_DIR, ["enriched_"]):
+        if os.path.exists(candidate):
+            return load_data(candidate)
+
+    if not fallback_to_processed:
+        logger.warning("Enriched session %s not found in %s", name, ENRICHED_DIR)
+        return None
+
+    processed_base = os.path.splitext(os.path.basename(name))[0]
+    if processed_base.startswith("enriched_"):
+        processed_base = processed_base[len("enriched_"):]
+
+    for candidate in _candidate_paths(processed_base, PROCESSED_DIR, ["clean_"]):
+        if os.path.exists(candidate):
+            logger.warning(
+                "Enriched file %s missing; falling back to processed version %s",
+                name,
+                os.path.basename(candidate),
+            )
+            return load_data(candidate)
+
+    logger.error("Session %s not found in enriched or processed directories.", name)
+    return None
+
+
+def list_enriched_sessions() -> List[str]:
+    """Return the list of available enriched parquet files (sorted alphabetically)."""
+    if not os.path.isdir(ENRICHED_DIR):
+        return []
+    return sorted(
+        f for f in os.listdir(ENRICHED_DIR)
+        if f.endswith(".parquet") and f.startswith("enriched_")
+    )
+
 def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) -> Optional[pd.DataFrame]:
     """
     Average numeric columns per second.
 
-    Useful for visualisations or reducing temporal resolution.
+    Useful for visualisations or reducing temporal resolution. The returned DataFrame contains
+    `Second` plus the averaged numeric columns.
     """
     try:
         if df is None or df.empty:
@@ -120,6 +207,7 @@ def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) ->
 #=======================================================================
 # BATCH LOADERS
 # ======================================================================
+@lru_cache(maxsize=8)
 def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True) -> Optional[pd.DataFrame]:
     """
     Load and concatenate parquet files from data/enriched or data/processed.
@@ -169,6 +257,7 @@ def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True)
     return None
 
 
+@lru_cache(maxsize=8)
 def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
     """
     Load the unified feature dataset for downstream modelling/analysis.
@@ -192,6 +281,13 @@ def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
 # ======================================================================
 if __name__ == "__main__":
     print("🔍 Quick load test:")
+    sessions = list_enriched_sessions()
+    if sessions:
+        print("First enriched session:", sessions[0])
+        df_session = load_enriched_session(sessions[0])
+        if df_session is not None:
+            print(df_session.head(3))
+
     df_all = load_all_sessions(limit=1)
     if df_all is not None:
         print(df_all.head(3))
@@ -204,3 +300,13 @@ if __name__ == "__main__":
     if df_features is not None:
         print("\n✅ Feature dataset:")
         print(df_features.head(3))
+
+
+__all__ = [
+    "load_data",
+    "load_enriched_session",
+    "list_enriched_sessions",
+    "average_per_second",
+    "load_all_sessions",
+    "load_features_dataset",
+]
