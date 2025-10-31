@@ -194,11 +194,22 @@ def process_all_sessions(
             )
             df = compute_jerk(df)
 
+            session_metrics = compute_session_metrics(df)
+            session_metrics = compute_fatigue_score(session_metrics)
+
+            fatigue_score = session_metrics.get("Fatigue_Score")
+            if fatigue_score is not None and np.isfinite(fatigue_score):
+                df["Fatigue_Score"] = fatigue_score
+                df["Fatigue_Score_session"] = fatigue_score
+                components = session_metrics.get("Fatigue_components", {})
+                for key, value in components.items():
+                    if value is None or not np.isfinite(value):
+                        continue
+                    df[f"Fatigue_component_{key}"] = value
+
             if save_enriched and data_dir == ENRICHED_DIR:
                 save_enriched_data(df, path)
 
-            session_metrics = compute_session_metrics(df)
-            session_metrics = compute_fatigue_score(session_metrics)
             session_metrics["session_file"] = os.path.basename(path)
             all_metrics.append(session_metrics)
 

@@ -26,6 +26,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from src.utils.kinematics import DEFAULT_VTR_SMOOTHING
+from src.data.metrics import compute_fatigue_score
+
 # ======================================================================
 # LOGGING CONFIGURATION
 # ======================================================================
@@ -166,6 +169,8 @@ def compute_window_features(df_win: pd.DataFrame, file_id: str, source_file: str
         out["Acc_mag_skew"] = _skew(x)
         out["Acc_mag_kurt"] = _kurtosis(x)
         out["Acc_mag_nan_frac"] = _nan_fraction("Acc_mag")
+        out["Acc_mean"] = out.get("Acc_mag_mean")
+        out["Acc_std"] = out.get("Acc_mag_std")
 
     # Translational velocity magnitude
     if "Vtr" in df_win.columns:
@@ -227,6 +232,35 @@ def compute_window_features(df_win: pd.DataFrame, file_id: str, source_file: str
         out["Fatigue_mean"] = np.nanmean(fs)
         out["Fatigue_std"] = np.nanstd(fs, ddof=1)
         out["Fatigue_nan_frac"] = _nan_fraction("Fatigue_Score")
+
+    # Compute fatigue score per window using available metrics
+    metrics_payload = {}
+    fc_mean = out.get("FC_mean")
+    if fc_mean is not None and np.isfinite(fc_mean):
+        metrics_payload["FC_mean"] = float(fc_mean)
+    spo2_mean = out.get("SpO2_mean")
+    if spo2_mean is not None and np.isfinite(spo2_mean):
+        metrics_payload["SpO2_mean"] = float(spo2_mean)
+    acc_std = out.get("Acc_std")
+    if acc_std is not None and np.isfinite(acc_std):
+        metrics_payload["Acc_std"] = float(acc_std)
+    jerk_std = out.get("jerk_std")
+    if jerk_std is not None and np.isfinite(jerk_std):
+        metrics_payload["jerk_std"] = float(jerk_std)
+
+    if metrics_payload:
+        score_dict = compute_fatigue_score(metrics_payload.copy())
+        fatigue_score = score_dict.get("Fatigue_Score")
+        if fatigue_score is not None and np.isfinite(fatigue_score):
+            out["Fatigue_Score_window"] = fatigue_score
+            # Backwards-compatible column name expected by downstream scripts/EDA
+            out["Fatigue_Score"] = fatigue_score
+            components = score_dict.get("Fatigue_components", {})
+            for key, value in components.items():
+                if value is None or not np.isfinite(value):
+                    continue
+                out[f"Fatigue_component_{key}_window"] = value
+                out[f"Fatigue_component_{key}"] = value
 
     return out
 
