@@ -15,7 +15,7 @@ from typing import List, Dict, Optional, Tuple
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
-from dash import Dash, Input, Output, dcc, html
+from dash import Dash, Input, Output, State, dcc, html
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
@@ -84,6 +84,23 @@ def relative_time_bounds(df: pd.DataFrame) -> Tuple[float, float]:
     return float(df["Relative_Time"].min()), float(df["Relative_Time"].max())
 
 # ======================================================================
+def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
+    duration = df["Relative_Time"].max() - df["Relative_Time"].min() if "Relative_Time" in df.columns else 0
+    info = {
+        "file": os.path.basename(source_path),
+        "rows": f"{len(df):,}",
+        "duration": f"{duration:.1f} s" if duration else "N/A",
+    }
+    for col in ("runner_id", "session_id", "reported_rpe", "estimated_rpe"):
+        if col in df.columns:
+            unique_vals = df[col].dropna().unique()
+            if unique_vals.size == 1:
+                info[col] = str(unique_vals[0])
+            elif unique_vals.size > 1:
+                info[col] = f"Mixed ({unique_vals.size})"
+    return info
+
+# ======================================================================
 # DASH APP INITIALISATION
 # ======================================================================
 app = Dash(__name__, external_stylesheets=[dbc.themes.LUX], suppress_callback_exceptions=True)
@@ -145,6 +162,38 @@ app.layout = dbc.Container(
             ],
             className="mb-4",
         ),
+        dbc.Row(
+            [
+                dbc.Col(
+                    dbc.Card(
+                        dbc.CardBody([
+                            html.H5("Session metadata", className="card-title"),
+                            html.Div(id="metadata-panel", children="Select a session to inspect its details."),
+                        ]),
+                        className="mb-3",
+                    ),
+                    width=6,
+                ),
+                dbc.Col(
+                    dbc.Card(
+                        dbc.CardBody([
+                            html.H5("Display options", className="card-title"),
+                            dbc.Checklist(
+                                options=[
+                                    {"label": "Use centred acceleration (if available)", "value": "centered"},
+                                    {"label": "Smooth translational velocity", "value": "smooth"},
+                                ],
+                                value=["smooth"],
+                                id="display-options",
+                                switch=True,
+                            ),
+                        ]),
+                        className="mb-3",
+                    ),
+                    width=6,
+                ),
+            ]
+        ),
         dcc.Tabs(
             id="tabs",
             value="acc_tab",
@@ -196,12 +245,28 @@ def update_time_slider(selected_path: Optional[str]):
     return t_min, t_max, [t_min, t_max], marks
 
 @app.callback(
+    Output("metadata-panel", "children"),
+    Input("file-dropdown", "value"),
+)
+def update_metadata_panel(selected_path: Optional[str]):
+    if not selected_path:
+        return "Select a session to inspect its details."
+    df = load_dataset(selected_path)
+    if df.empty:
+        return "Unable to load the selected session."
+    metadata = session_metadata(df, selected_path)
+    items = [html.Div([html.Strong(f"{k.replace('_', ' ').title()}:"), f" {v}"]) for k, v in metadata.items()]
+    return html.Div(items)
+
+
+@app.callback(
     Output("tab-content", "children"),
     Input("file-dropdown", "value"),
     Input("time-slider", "value"),
     Input("tabs", "value"),
+    Input("display-options", "value"),
 )
-def render_tab(selected_path: Optional[str], selected_time: List[float], selected_tab: str):
+def render_tab(selected_path: Optional[str], selected_time: List[float], selected_tab: str, options: List[str]):
     """
     Render the currently selected tab.
     """
@@ -223,6 +288,9 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
     if window.empty:
         return dbc.Alert("No samples available for the selected time interval.", color="warning")
 
+    use_centered = "centered" in (options or [])
+    smooth_vtr = "smooth" in (options or [])
+
     def style_fig(fig):
         fig.update_layout(
             template="plotly_white",
@@ -242,13 +310,20 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
 
     if selected_tab in axis_tabs:
         cols, title, y_label = axis_tabs[selected_tab]
-        available = [c for c in cols if c in window.columns]
+        if use_centered and selected_tab == "acc_tab":
+            centred_cols = [c + "_centered" for c in cols]
+            available = [c for c in centred_cols if c in window.columns]
+            display_cols = available
+            y_label += " (centered)"
+        else:
+            available = [c for c in cols if c in window.columns]
+            display_cols = available
         if not available:
             return dbc.Alert(f"Expected columns not found: {cols}", color="warning")
         fig = px.line(
             window,
             x="Relative_Time",
-            y=available,
+            y=display_cols,
             title=title,
             labels={"value": y_label, "variable": "Axis", "Relative_Time": "Time (s)"},
         )
@@ -281,22 +356,30 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
     if selected_tab == "vtr_tab":
         if "Vtr" not in window.columns:
             return dbc.Alert("Translational velocity is not available in this file.", color="warning")
-        smooth = window["Vtr"].rolling(window=DEFAULT_VTR_SMOOTHING, center=True, min_periods=1).mean()
-        fig = px.line(
-            window,
-            x="Relative_Time",
-            y=smooth,
-            title="Translational velocity (smoothed)",
-            labels={"Relative_Time": "Time (s)", "y": "Velocity (m/s)"},
-        )
-        fig.add_scatter(
-            x=window["Relative_Time"],
-            y=window["Vtr"],
-            mode="lines",
-            name="Raw Vtr",
-            line=dict(color="rgba(150,150,150,0.3)", width=1, dash="dot"),
-        )
-        fig.update_traces(showlegend=False, selector=dict(name="y"))
+        if smooth_vtr:
+            smoothed = window["Vtr"].rolling(window=DEFAULT_VTR_SMOOTHING, center=True, min_periods=1).mean()
+            fig = px.line(
+                window,
+                x="Relative_Time",
+                y=smoothed,
+                title="Translational velocity (smoothed)",
+                labels={"Relative_Time": "Time (s)", "value": "Velocity (m/s)"},
+            )
+            fig.add_scatter(
+                x=window["Relative_Time"],
+                y=window["Vtr"],
+                mode="lines",
+                name="Raw Vtr",
+                line=dict(color="rgba(150,150,150,0.3)", width=1, dash="dot"),
+            )
+        else:
+            fig = px.line(
+                window,
+                x="Relative_Time",
+                y="Vtr",
+                title="Translational velocity (raw)",
+                labels={"Relative_Time": "Time (s)", "Vtr": "Velocity (m/s)"},
+            )
         return dcc.Graph(figure=style_fig(fig))
 
     return dbc.Alert("Tab not recognised.", color="danger")
