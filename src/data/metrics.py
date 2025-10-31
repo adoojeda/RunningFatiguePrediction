@@ -1,20 +1,36 @@
 """
-Unified computation of biomechanical and physiological metrics:
-- High-pass filter + integration of centered accelerations → translational velocity (Vtr).
-- Jerk computation (derivative of acceleration).
-- Session-level metrics and Fatigue Score calculation.
-- Export of per-session metrics and global consolidation.
+Biomechanical/physiological metrics (pipeline stage 3/5):
+- High-pass filter + integration of centred accelerations → translational velocity (Vtr).
+- Jerk computation (derivative of acceleration) and fatigue scoring.
+- Persist enriched sessions and a consolidated metrics table.
+
+Input: `data/enriched/enriched_*.parquet`
+Outputs: updated enriched parquet files + `data/results/all_sessions_metrics.parquet`
+Next stage: `python src/features/features_extraction.py`
 """
 
 import os
+import sys
 import logging
 from glob import glob
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-from scipy import integrate
-from scipy.signal import butter, filtfilt
+
+# Ensure project root on sys.path when executed directly
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from src.utils.kinematics import (
+    DEFAULT_FS,
+    DEFAULT_HP_CUTOFF,
+    centre_accelerations,
+    compute_acceleration_magnitudes,
+    compute_translational_velocity,
+    compute_jerk,
+)
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -46,98 +62,6 @@ WEIGHTS = {
     "spo2": 0.15,
 }
 
-# ======================================================================
-# HIGH-PASS FILTER (Butterworth)
-# ======================================================================
-def highpass_filter(data: np.ndarray, fs: float, cutoff: float = 0.3, order: int = 3) -> np.ndarray:
-    """Butterworth high-pass filter robust against NaNs and drift."""
-    data = np.asarray(data, dtype=float)
-    if not np.isfinite(fs) or fs <= 0 or len(data) < 10:
-        return data
-
-    # Interpolate NaNs before filtering
-    if np.isnan(data).any():
-        idx = np.arange(len(data))
-        data = np.interp(idx, idx[~np.isnan(data)], data[~np.isnan(data)])
-
-    nyquist = 0.5 * fs
-    normal_cutoff = min(cutoff / nyquist, 0.99)
-    b, a = butter(order, normal_cutoff, btype="high", analog=False)
-    try:
-        return filtfilt(b, a, data, method="gust")
-    except Exception:
-        return filtfilt(b, a, data)
-
-# ======================================================================
-# TRANSLATIONAL VELOCITY
-# ======================================================================
-def compute_velocity(df: pd.DataFrame) -> pd.DataFrame:
-    """Integrate centered accelerations to obtain Vx, Vy, Vz, and Vtr."""
-    try:
-        required_cols = ["Relative_Time", "AccX_centered", "AccY_centered", "AccZ_centered"]
-        if not all(col in df.columns for col in required_cols):
-            logger.warning("⚠️ Missing required columns to compute Vtr.")
-            return df
-
-        t = df["Relative_Time"].to_numpy(dtype=float)
-        if len(t) < 2:
-            return df
-
-        fs = 1.0 / np.median(np.diff(t))
-        fs = 50.0 if not np.isfinite(fs) else fs
-
-        acc_hp = {}
-        for axis in ["X", "Y", "Z"]:
-            col = f"Acc{axis}_centered"
-            acc_hp[axis] = highpass_filter(df[col].to_numpy(dtype=float), fs)
-            acc_hp[axis] -= np.mean(acc_hp[axis])
-
-        # Integrate once to obtain velocity components
-        Vx = integrate.cumtrapz(acc_hp["X"], x=t, initial=0)
-        Vy = integrate.cumtrapz(acc_hp["Y"], x=t, initial=0)
-        Vz = integrate.cumtrapz(acc_hp["Z"], x=t, initial=0)
-
-        # Re-center to remove residual drift
-        Vx -= np.mean(Vx)
-        Vy -= np.mean(Vy)
-        Vz -= np.mean(Vz)
-
-        df["Vx"], df["Vy"], df["Vz"] = Vx, Vy, Vz
-        df["Vtr"] = np.sqrt(Vx**2 + Vy**2 + Vz**2)
-
-        logger.info("✅ Translational velocity computed successfully (fs≈%.2f Hz)", fs)
-        return df
-
-    except Exception as exc:
-        logger.error("❌ Error computing Vtr: %s", exc, exc_info=True)
-        return df
-
-# ======================================================================
-# JERK COMPUTATION
-# ======================================================================
-def compute_jerk(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute jerk (time derivative of centered acceleration)."""
-    try:
-        if "Relative_Time" not in df.columns:
-            logger.warning("⚠️ Missing 'Relative_Time' column needed to compute jerk.")
-            return df
-
-        t = df["Relative_Time"].to_numpy(dtype=float)
-        dt = np.gradient(t)
-
-        for axis in ["X", "Y", "Z"]:
-            col = f"Acc{axis}_centered"
-            if col in df.columns:
-                df[f"jerk{axis}"] = np.gradient(df[col], dt)
-            else:
-                df[f"jerk{axis}"] = np.nan
-
-        df["jerk_mag"] = np.sqrt(df["jerkX"] ** 2 + df["jerkY"] ** 2 + df["jerkZ"] ** 2)
-        return df
-
-    except Exception as exc:
-        logger.error("❌ Error computing jerk: %s", exc, exc_info=True)
-        return df
 
 # ======================================================================
 # SESSION METRICS
@@ -261,7 +185,13 @@ def process_all_sessions(
     for path in files:
         try:
             df = pd.read_parquet(path)
-            df = compute_velocity(df)
+            df = centre_accelerations(df)
+            df = compute_acceleration_magnitudes(df)
+            df = compute_translational_velocity(
+                df,
+                default_fs=DEFAULT_FS,
+                cutoff=DEFAULT_HP_CUTOFF,
+            )
             df = compute_jerk(df)
 
             if save_enriched and data_dir == ENRICHED_DIR:
@@ -283,7 +213,7 @@ def process_all_sessions(
     df_all = pd.DataFrame(all_metrics)
     os.makedirs(RESULTS_DIR, exist_ok=True)
     df_all.to_parquet(OUTPUT_PARQUET, index=False)
-    logger.info("📊 Global metrics saved to: %s and %s", OUTPUT_PARQUET)
+    logger.info("📊 Global metrics saved to: %s", OUTPUT_PARQUET)
     return df_all
 
 # ======================================================================

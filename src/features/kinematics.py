@@ -1,17 +1,27 @@
 """
-Kinematic feature generation for running signals:
-- Compute centered accelerations per axis.
-- Derive total and dynamic acceleration magnitudes.
-- Provide the baseline features required by metrics and feature-extraction modules.
+Kinematic feature generation (pipeline stage 2/5):
+- Centre accelerations per axis and compute raw/dynamic magnitudes.
+- Prepare enriched parquet files consumed by metrics and feature extraction stages.
+
+Input: `data/processed/clean_*.parquet`
+Output: `data/enriched/enriched_*.parquet`
+Next stage: `python src/data/metrics.py`
 """
 
-import os
 import logging
+import os
+import sys
 from glob import glob
 from typing import Optional
 
-import numpy as np
 import pandas as pd
+
+# Ensure project root on sys.path when executed as a script
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from src.utils.kinematics import centre_accelerations, compute_acceleration_magnitudes
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -25,7 +35,7 @@ logger = logging.getLogger(__name__)
 # ======================================================================
 # PATH CONFIGURATION
 # ======================================================================
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+BASE_DIR = PROJECT_ROOT
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 ENRICHED_DIR = os.path.join(BASE_DIR, "data", "enriched")
 
@@ -37,29 +47,8 @@ def compute_kinematics(df: pd.DataFrame) -> pd.DataFrame:
     Ensure centered acceleration and magnitude features are present in the DataFrame.
     """
     try:
-        # Center each acceleration axis to remove bias / gravity components.
-        for axis in ["X", "Y", "Z"]:
-            col = f"Acc{axis}"
-            centered_col = f"{col}_centered"
-            if col not in df.columns:
-                logger.warning("Column %s not found; skipping centering for this axis.", col)
-                continue
-            df[centered_col] = df[col] - df[col].mean()
-
-        required_cols = ["AccX", "AccY", "AccZ", "AccX_centered", "AccY_centered", "AccZ_centered"]
-        if not all(col in df.columns for col in required_cols):
-            missing = [col for col in required_cols if col not in df.columns]
-            logger.warning("Skipping magnitude computation; missing columns: %s", missing)
-            return df
-
-        # Magnitude of raw acceleration.
-        df["Acc_mag"] = np.sqrt(df["AccX"] ** 2 + df["AccY"] ** 2 + df["AccZ"] ** 2)
-
-        # Magnitude of centered (dynamic) acceleration.
-        df["Acc_dyn_mag"] = np.sqrt(
-            df["AccX_centered"] ** 2 + df["AccY_centered"] ** 2 + df["AccZ_centered"] ** 2
-        )
-
+        centre_accelerations(df)
+        compute_acceleration_magnitudes(df)
         return df
 
     except Exception as exc:

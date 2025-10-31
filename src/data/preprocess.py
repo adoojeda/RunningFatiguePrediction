@@ -1,14 +1,16 @@
 """
-Running signal data preprocessing:
-- Data cleaning (filtering physical and physiological outliers).
-- Limited interpolation of HR and SpO2.
-- Keep all useful columns (gravity, rotation, orientation) for future biomechanics analysis or models.
-- Drop only the absolute timestamp column.
+Running signal data preprocessing (pipeline stage 1/5):
+- Clean raw CSV recordings into analysis-ready parquet files.
+- Filter physical/physiological outliers and interpolate short gaps in HR/SpO₂.
+- Keep gravity/rotation/orientation signals for downstream biomechanical models.
+- Drop only the absolute timestamp column; create `Relative_Time` instead.
 
-Saves the preprocessed data in Parquet format under data/processed/.
+Output: `data/processed/clean_*.parquet`
+Next stage: `python src/features/kinematics.py`
 """
 
 import os
+import sys
 import json
 import logging
 import numpy as np
@@ -16,6 +18,12 @@ import pandas as pd
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 from typing import Optional, List
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from src.utils.kinematics import estimate_sampling_rate, DEFAULT_FS
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -28,7 +36,6 @@ logging.basicConfig(
 # ======================================================================
 # PATH CONFIGURATION
 # ======================================================================
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 os.makedirs(PROCESSED_DIR, exist_ok=True)
@@ -45,15 +52,6 @@ MAX_WORKERS = max(1, os.cpu_count() // 2)
 # ======================================================================
 # HELPER FUNCTIONS
 # ======================================================================
-def _estimate_fs(t: pd.Series) -> float:
-    """Estimate sampling frequency using the median Δt."""
-    t = pd.to_numeric(t, errors="coerce").dropna().values
-    if len(t) < 2:
-        return np.nan
-    dt = np.diff(t)
-    dt_med = np.median(dt)
-    return np.nan if dt_med <= 0 or not np.isfinite(dt_med) else 1.0 / dt_med
-
 def _interp_limit_from_seconds(fs_est: float, seconds: float) -> int:
     """Convert a time threshold (s) into the number of consecutive samples to interpolate."""
     if not np.isfinite(fs_est) or fs_est <= 0:
@@ -95,7 +93,7 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
         df.drop(columns=["Time"], inplace=True, errors="ignore")
 
         # Estimate sampling frequency
-        fs_est = _estimate_fs(df["Relative_Time"])
+        fs_est = estimate_sampling_rate(df["Relative_Time"]) or DEFAULT_FS
         interp_limit = _interp_limit_from_seconds(fs_est, INTERP_MAX_GAP_SEC)
 
         # Ensure numeric types

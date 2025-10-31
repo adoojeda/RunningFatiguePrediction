@@ -21,7 +21,8 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from src.utils.data_loader import load_data  
+from src.utils.data_loader import load_data
+from src.utils.kinematics import DEFAULT_VTR_SMOOTHING
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -280,7 +281,7 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
     if selected_tab == "vtr_tab":
         if "Vtr" not in window.columns:
             return dbc.Alert("Translational velocity is not available in this file.", color="warning")
-        smooth = window["Vtr"].rolling(window=10, center=True, min_periods=1).mean()
+        smooth = window["Vtr"].rolling(window=DEFAULT_VTR_SMOOTHING, center=True, min_periods=1).mean()
         fig = px.line(
             window,
             x="Relative_Time",

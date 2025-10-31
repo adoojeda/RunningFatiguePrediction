@@ -1,20 +1,30 @@
 """
-Sliding-window feature extraction for running fatigue analysis.
+Sliding-window feature extraction (pipeline stage 4/5).
 
 - Generates overlapping windows (default 5 s, 50% overlap) over enriched sensor data.
-- Computes robust statistics for accelerations, translational velocity, jerk, HR, SpO₂ and fatigue score.
+- Computes robust statistics for acceleration, translational velocity, jerk, HR, SpO₂ and fatigue score.
 - Tracks per-window quality metrics (sample count, NaN ratios, duration).
 - Joins the resulting features with the RPE mapping (runner/session metadata).
-- Saves the consolidated dataset under data/results/ (configurable via CLI).
+- Saves the consolidated dataset under `data/results/` (configurable via CLI).
+
+Input: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
+Output: `data/results/features_dataset_5s_50olap.parquet`
+Next stage: analysis scripts under `src/analysis/`.
 """
 
 import argparse
 import logging
 import os
+import sys
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+# Ensure project root on sys.path when executed directly
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 # ======================================================================
 # LOGGING CONFIGURATION
