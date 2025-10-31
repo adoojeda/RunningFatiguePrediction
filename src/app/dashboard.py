@@ -17,12 +17,11 @@ import pandas as pd
 import plotly.express as px
 from dash import Dash, Input, Output, dcc, html
 
-# Ensure project root in sys.path to resolve `src.*` imports when run as a script
 BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from src.utils.data_loader import load_data  # noqa: E402
+from src.utils.data_loader import load_data  
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -38,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ======================================================================
 DATA_DIR = BASE_DIR / "data"
 ENRICHED_DIR = DATA_DIR / "enriched"
-PROCESSED_DIR = DATA_DIR / "processed"
 EXCLUDED_PREFIXES = ("all_sessions_metrics", "features_dataset")
 
 # ======================================================================
@@ -46,20 +44,17 @@ EXCLUDED_PREFIXES = ("all_sessions_metrics", "features_dataset")
 # ======================================================================
 def available_files() -> List[Dict[str, str]]:
     """
-    Return a list of parquet files available in data/enriched/ (preferred) or data/processed/.
+    Return a list of enriched parquet files available in data/enriched/.
     """
-    options: List[Dict[str, str]] = []
-    for directory, label_prefix in (
-        (ENRICHED_DIR, "enriched"),
-        (PROCESSED_DIR, "processed"),
-    ):
-        if not directory.exists():
+    if not ENRICHED_DIR.exists():
+        return []
+
+    options = []
+    for path in sorted(ENRICHED_DIR.glob("enriched_*.parquet")):
+        if any(path.stem.startswith(prefix) for prefix in EXCLUDED_PREFIXES):
             continue
-        for path in sorted(directory.glob("*.parquet")):
-            if path.stem.startswith(EXCLUDED_PREFIXES):
-                continue
-            label = f"{path.name} ({label_prefix})" if directory == ENRICHED_DIR else path.name
-            options.append({"label": label, "value": str(path)})
+        options.append({"label": path.name, "value": str(path)})
+
     return options
 
 @lru_cache(maxsize=32)
@@ -99,6 +94,14 @@ app.title = "Running Signals Dashboard"
 file_options = available_files()
 default_file = file_options[0]["value"] if file_options else None
 
+empty_notice = html.Div(
+    dbc.Alert(
+        "No enriched parquet files found in data/enriched/. Run the preprocessing, kinematics, and metrics pipelines first.",
+        color="warning",
+    ),
+    className="mb-4",
+) if not file_options else None
+
 app.layout = dbc.Container(
     [
         html.H1(
@@ -106,11 +109,12 @@ app.layout = dbc.Container(
             className="text-center mb-4",
             style={"color": "#1f2c56"},
         ),
+        empty_notice if empty_notice else html.Div(),
         dbc.Row(
             [
                 dbc.Col(
                     [
-                        html.Label("Select enriched/processed session:"),
+                        html.Label("Select enriched session:"),
                         dcc.Dropdown(
                             id="file-dropdown",
                             options=file_options,
