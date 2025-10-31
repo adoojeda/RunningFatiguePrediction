@@ -1,6 +1,10 @@
 """
-Compare two 2-second translational velocity (Vtr) segments from the same session
-using side-by-side Plotly line charts with a shared y-axis scale.
+Compare translational velocity (Vtr) segments within a single session using side-by-side plots.
+
+Examples
+--------
+    python src/analysis/vtr_segment_comparison.py --file data/enriched/enriched_session.parquet
+    python src/analysis/vtr_segment_comparison.py --file ... --segments 10 12 40 43
 """
 
 from __future__ import annotations
@@ -90,6 +94,19 @@ def select_random_segments(
         segments.append(Segment(start=start, end=end))
 
     logger.info("Random segments selected: %s", [s.label() for s in segments])
+    return segments
+
+
+def parse_manual_segments(values: List[float]) -> List[Segment]:
+    """Convert a flat list of [start1, end1, start2, end2, ...] into Segment objects."""
+    if len(values) < 2 or len(values) % 2 != 0:
+        raise ValueError("Manual segments require an even number of values (start end ...).")
+
+    segments: List[Segment] = []
+    for start, end in zip(values[::2], values[1::2]):
+        if end <= start:
+            raise ValueError(f"Segment end {end} must be greater than start {start}.")
+        segments.append(Segment(start=float(start), end=float(end)))
     return segments
 
 def plot_two_segments_side_by_side(
@@ -190,12 +207,23 @@ def main(
     duration: float = 2.0,
     seed: Optional[int] = None,
     show: bool = False,
+    manual_segments: Optional[List[Segment]] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Generate the comparison visualisation for two random segments.
     """
     df = load_session(file_path)
-    segments = select_random_segments(df, n_segments=2, duration=duration, seed=seed)
+    if manual_segments:
+        segments = manual_segments
+    else:
+        segments = select_random_segments(df, n_segments=2, duration=duration, seed=seed)
+
+    t_min, t_max = df["Relative_Time"].min(), df["Relative_Time"].max()
+    for seg in segments:
+        if seg.start < t_min or seg.end > t_max:
+            raise ValueError(
+                f"Segment {seg.label()} is outside the available time range ({t_min:.2f}-{t_max:.2f}s)."
+            )
 
     session_name = os.path.splitext(os.path.basename(file_path))[0]
     output_dir = os.path.join(DEFAULT_OUTPUT_DIR, session_name)
@@ -218,17 +246,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file", required=True, help="Path to the enriched parquet file (enriched_*.parquet).")
     parser.add_argument("--duration", type=float, default=2.0, help="Duration of each segment in seconds (default 2.0).")
     parser.add_argument("--seed", type=int, default=None, help="Random seed to reproduce segment selection.")
+    parser.add_argument(
+        "--segments",
+        type=float,
+        nargs="+",
+        help="Manual segment boundaries [start1 end1 start2 end2 ...] in seconds.",
+    )
     parser.add_argument("--show", action="store_true", help="Display the figure interactively.")
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
     try:
+        manual_segments = parse_manual_segments(args.segments) if args.segments else None
         html_path, png_path = main(
             file_path=args.file,
             duration=args.duration,
-            seed=args.seed,
+            seed=None if manual_segments else args.seed,
             show=args.show,
+            manual_segments=manual_segments,
         )
         logger.info("✅ Visualisation ready: %s%s", html_path, f' and {png_path}' if png_path else "")
     except Exception as exc:

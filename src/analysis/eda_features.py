@@ -2,7 +2,8 @@
 Exploratory data analysis (EDA) for the sliding-window feature dataset.
 
 Generates descriptive statistics and a collection of plots that tie biomechanical
-and physiological metrics with perceived exertion (RPE).
+and physiological metrics with perceived exertion (RPE). Supports filtering by
+session/metric and exporting the results as a ZIP report.
 """
 
 from __future__ import annotations
@@ -11,7 +12,9 @@ import argparse
 import logging
 import os
 import sys
-from typing import List, Optional
+from datetime import datetime
+from typing import Iterable, List, Optional
+from zipfile import ZipFile
 
 import matplotlib
 
@@ -63,11 +66,11 @@ def add_comment(text: str, bottom: float = -0.08) -> None:
         style="italic",
     )
 
-def safe_histogram(data: pd.Series, variable: str, output_dir: str, comment: str) -> None:
+def safe_histogram(data: pd.Series, variable: str, output_dir: str, comment: str) -> Optional[str]:
     data = data.replace([np.inf, -np.inf], np.nan).dropna()
     if data.empty:
         logger.warning("Skipping histogram for %s; no valid data.", variable)
-        return
+        return None
 
     plt.figure(figsize=(8, 4))
     plt.hist(data, bins=30, color="steelblue", alpha=0.7, edgecolor="black")
@@ -81,16 +84,17 @@ def safe_histogram(data: pd.Series, variable: str, output_dir: str, comment: str
     plt.savefig(path, bbox_inches="tight")
     plt.close()
     logger.info("Saved histogram: %s", path)
+    return path
 
-def safe_boxplot(df: pd.DataFrame, x: str, y: str, output_dir: str, comment: str) -> None:
+def safe_boxplot(df: pd.DataFrame, x: str, y: str, output_dir: str, comment: str) -> Optional[str]:
     if y not in df.columns or x not in df.columns:
         logger.warning("Skipping boxplot for %s vs %s; column not found.", y, x)
-        return
+        return None
 
     data = df[[x, y]].replace([np.inf, -np.inf], np.nan).dropna()
     if data.empty or data[x].nunique() == 0:
         logger.warning("Skipping boxplot for %s vs %s; no valid samples.", y, x)
-        return
+        return None
 
     plt.figure(figsize=(6, 4))
     sns.boxplot(x=x, y=y, data=data, palette="coolwarm")
@@ -104,6 +108,7 @@ def safe_boxplot(df: pd.DataFrame, x: str, y: str, output_dir: str, comment: str
     plt.savefig(path, bbox_inches="tight")
     plt.close()
     logger.info("Saved boxplot: %s", path)
+    return path
 
 def safe_scatter(
     df: pd.DataFrame,
@@ -113,10 +118,10 @@ def safe_scatter(
     output_dir: str,
     comment: str,
     palette: str = "viridis",
-) -> None:
+) -> Optional[str]:
     if x not in df.columns or y not in df.columns:
         logger.warning("Skipping scatter %s vs %s; required columns missing.", x, y)
-        return
+        return None
 
     data_cols = [x, y]
     if hue and hue in df.columns:
@@ -124,7 +129,7 @@ def safe_scatter(
     data = df[data_cols].replace([np.inf, -np.inf], np.nan).dropna()
     if data.empty:
         logger.warning("Skipping scatter %s vs %s; no valid samples.", x, y)
-        return
+        return None
 
     plt.figure(figsize=(7, 5))
     hue_arg = hue if hue and hue in data.columns else None
@@ -142,18 +147,19 @@ def safe_scatter(
     plt.savefig(path, bbox_inches="tight")
     plt.close()
     logger.info("Saved scatter plot: %s", path)
+    return path
 
 
-def correlation_heatmap(df: pd.DataFrame, output_dir: str) -> None:
+def correlation_heatmap(df: pd.DataFrame, output_dir: str) -> Optional[str]:
     numeric = df.select_dtypes(include=[np.number])
     if numeric.empty:
         logger.warning("No numeric columns available for correlation heatmap.")
-        return
+        return None
 
     corr = numeric.corr().replace([np.inf, -np.inf], np.nan).dropna(how="all").dropna(axis=1, how="all")
     if corr.empty:
         logger.warning("Correlation matrix is empty after cleaning; skipping heatmap.")
-        return
+        return None
 
     plt.figure(figsize=(12, 10))
     sns.heatmap(corr, cmap="coolwarm", center=0, annot=False)
@@ -164,11 +170,12 @@ def correlation_heatmap(df: pd.DataFrame, output_dir: str) -> None:
     plt.savefig(path, bbox_inches="tight")
     plt.close()
     logger.info("Saved correlation heatmap: %s", path)
+    return path
 
 # ======================================================================
 # EDA ROUTINES
 # ======================================================================
-def describe_dataset(df: pd.DataFrame, output_dir: str) -> None:
+def describe_dataset(df: pd.DataFrame, output_dir: str) -> List[str]:
     summary_path = os.path.join(output_dir, "summary_statistics.csv")
     df.describe().T.to_csv(summary_path)
     logger.info("Summary statistics saved to %s", summary_path)
@@ -181,32 +188,54 @@ def describe_dataset(df: pd.DataFrame, output_dir: str) -> None:
         rpe_path = os.path.join(output_dir, "rpe_distribution.csv")
         df["reported_rpe"].value_counts(dropna=False).sort_index().to_csv(rpe_path, header=["count"])
         logger.info("Reported RPE distribution saved to %s", rpe_path)
+        return [summary_path, nan_path, rpe_path]
+
+    return [summary_path, nan_path]
 
 
-def plot_distributions(df: pd.DataFrame, output_dir: str) -> None:
+def plot_distributions(df: pd.DataFrame, output_dir: str, metrics: Optional[Iterable[str]] = None) -> List[str]:
     comments = {
         "Vtr_mean": "Translational velocity per window reflects movement intensity.",
         "FC_mean": "Average heart rate summarises physiological response to effort.",
         "jerk_std": "Jerk variability increases with neuromuscular fatigue.",
         "Fatigue_Score": "Composite fatigue index derived from biomechanical and physiological signals.",
     }
-    for variable in comments:
-        if variable in df.columns:
-            safe_histogram(df[variable], variable, output_dir, comments[variable])
+    selected = list(metrics) if metrics else list(comments)
+    paths: List[str] = []
+    for variable in selected:
+        if variable in df.columns and variable in comments:
+            saved = safe_histogram(df[variable], variable, output_dir, comments[variable])
+            if saved:
+                paths.append(saved)
+        elif variable not in df.columns:
+            logger.warning("Distribution metric %s not found in dataset.", variable)
+    return paths
 
-def plot_rpe_relationships(df: pd.DataFrame, output_dir: str) -> None:
+def plot_rpe_relationships(df: pd.DataFrame, output_dir: str, metrics: Optional[Iterable[str]] = None) -> List[str]:
     comments = {
         "Vtr_mean": "Translational velocity tends to decline as perceived exertion grows.",
         "FC_mean": "Heart rate rises linearly with RPE, validating physiological response.",
         "jerk_std": "Movement variability rises with RPE, signalling loss of motor control.",
         "Fatigue_Score": "Fatigue Score aligns with RPE, bridging objective and subjective fatigue.",
     }
-    for variable in comments:
-        if variable in df.columns and "reported_rpe" in df.columns:
-            safe_boxplot(df, x="reported_rpe", y=variable, output_dir=output_dir, comment=comments[variable])
+    if "reported_rpe" not in df.columns:
+        logger.warning("Column 'reported_rpe' not found; skipping RPE relationships.")
+        return []
 
-def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> None:
-    safe_scatter(
+    selected = list(metrics) if metrics else list(comments)
+    paths: List[str] = []
+    for variable in selected:
+        if variable in df.columns and variable in comments:
+            saved = safe_boxplot(df, x="reported_rpe", y=variable, output_dir=output_dir, comment=comments[variable])
+            if saved:
+                paths.append(saved)
+        elif variable not in df.columns:
+            logger.warning("RPE relationship metric %s not found in dataset.", variable)
+    return paths
+
+def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[str]:
+    paths: List[str] = []
+    saved = safe_scatter(
         df,
         x="FC_mean",
         y="reported_rpe",
@@ -214,7 +243,9 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> None:
         output_dir=output_dir,
         comment="Heart rate vs RPE shows the physiological-perception linkage.",
     )
-    safe_scatter(
+    if saved:
+        paths.append(saved)
+    saved = safe_scatter(
         df,
         x="Vtr_mean",
         y="reported_rpe",
@@ -223,22 +254,28 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> None:
         comment="Higher RPE typically corresponds to lower translational velocity.",
         palette="coolwarm",
     )
-    safe_boxplot(
+    if saved:
+        paths.append(saved)
+    saved = safe_boxplot(
         df,
         x="reported_rpe",
         y="jerk_std",
         output_dir=output_dir,
         comment="Jerk variability captures instability with increasing fatigue.",
     )
+    if saved:
+        paths.append(saved)
     if "Acc_mag_std" in df.columns:
-        safe_boxplot(
+        saved = safe_boxplot(
             df,
             x="reported_rpe",
             y="Acc_mag_std",
             output_dir=output_dir,
             comment="Acceleration variability mirrors degraded motor control.",
         )
-    safe_scatter(
+        if saved:
+            paths.append(saved)
+    saved = safe_scatter(
         df,
         x="Fatigue_Score",
         y="reported_rpe",
@@ -247,23 +284,69 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> None:
         comment="Assesses agreement between computed fatigue score and subjective exertion.",
         palette="flare",
     )
+    if saved:
+        paths.append(saved)
+    return paths
 
 # ======================================================================
 # ORCHESTRATION
 # ======================================================================
-def run_eda(dataset_path: str, output_dir: str) -> None:
+def run_eda(
+    dataset_path: str,
+    output_dir: str,
+    sessions: Optional[List[str]] = None,
+    metrics: Optional[List[str]] = None,
+    zip_name: Optional[str] = None,
+) -> Optional[str]:
     os.makedirs(output_dir, exist_ok=True)
     df = load_features_dataset(path=dataset_path)
     if df is None or df.empty:
         raise ValueError("Feature dataset could not be loaded or is empty.")
 
-    describe_dataset(df, output_dir)
-    plot_distributions(df, output_dir)
-    plot_rpe_relationships(df, output_dir)
-    correlation_heatmap(df, output_dir)
-    plot_specialised_relationships(df, output_dir)
+    if sessions:
+        filters = set(str(s) for s in sessions)
+        mask = pd.Series(False, index=df.index)
+        for col in ("session_id", "file", "source_file", "runner_id"):
+            if col in df.columns:
+                mask |= df[col].astype(str).isin(filters)
+        df = df[mask]
+        if df.empty:
+            raise ValueError("No rows remain after applying session filters.")
+        logger.info("Filtered dataset to %d rows using sessions %s", len(df), sorted(filters))
+
+    metric_list = [m.strip() for m in metrics] if metrics else None
+    generated_files: List[str] = []
+
+    generated_files.extend(describe_dataset(df, output_dir))
+    generated_files.extend(plot_distributions(df, output_dir, metrics=metric_list))
+    generated_files.extend(plot_rpe_relationships(df, output_dir, metrics=metric_list))
+    heatmap_path = correlation_heatmap(df, output_dir)
+    if heatmap_path:
+        generated_files.append(heatmap_path)
+    generated_files.extend(plot_specialised_relationships(df, output_dir))
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_files = []
+    for path in generated_files:
+        if path and os.path.exists(path) and path not in seen:
+            seen.add(path)
+            unique_files.append(path)
+
+    zip_path: Optional[str] = None
+    if zip_name:
+        base = zip_name if zip_name != "auto" else f"eda_report_{datetime.now():%Y%m%d_%H%M%S}"
+        if not base.endswith(".zip"):
+            base = f"{base}.zip"
+        zip_path = os.path.join(os.path.dirname(output_dir), base)
+        with ZipFile(zip_path, "w") as archive:
+            for file_path in unique_files:
+                arcname = os.path.relpath(file_path, output_dir) if file_path.startswith(output_dir) else os.path.basename(file_path)
+                archive.write(file_path, arcname=arcname)
+        logger.info("Zipped report generated at %s", zip_path)
 
     logger.info("EDA completed. Figures stored in %s", output_dir)
+    return zip_path
 
 
 def parse_args() -> argparse.Namespace:
@@ -282,11 +365,36 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_DIR,
         help=f"Directory to store generated figures (default: {DEFAULT_OUTPUT_DIR}).",
     )
+    parser.add_argument(
+        "--session",
+        nargs="+",
+        help="Optional session identifiers (session_id/file/source_file) to include in the EDA.",
+    )
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        help="Optional list of metric columns to focus on (applies to distributions and RPE plots).",
+    )
+    parser.add_argument(
+        "--zip",
+        nargs="?",
+        const="auto",
+        default=None,
+        help="Create a ZIP archive of generated outputs. Optionally supply the archive name.",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
     try:
-        run_eda(dataset_path=args.dataset, output_dir=args.output)
+        zip_path = run_eda(
+            dataset_path=args.dataset,
+            output_dir=args.output,
+            sessions=args.session,
+            metrics=args.metrics,
+            zip_name=args.zip,
+        )
+        if zip_path:
+            logger.info("🗜️  Compressed report available at %s", zip_path)
     except Exception as exc:
         logger.error("EDA failed: %s", exc, exc_info=True)
