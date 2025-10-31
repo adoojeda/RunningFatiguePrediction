@@ -101,7 +101,7 @@ def _nanmax(x: np.ndarray) -> float:
 # ======================================================================
 # WINDOW-LEVEL FEATURE COMPUTATION
 # ======================================================================
-def compute_window_features(df_win: pd.DataFrame, file_name: str) -> Dict:
+def compute_window_features(df_win: pd.DataFrame, file_id: str, source_file: str) -> Dict:
     """
     Compute statistics for an already segmented window (df_win).
     Returns a dictionary containing features and metadata.
@@ -113,7 +113,8 @@ def compute_window_features(df_win: pd.DataFrame, file_name: str) -> Dict:
     t1 = float(df_win["Relative_Time"].max())
     duration = t1 - t0 if np.isfinite(t1) else np.nan
 
-    out["file"] = file_name
+    out["file"] = file_id
+    out["source_file"] = source_file
     out["start_s"] = t0
     out["end_s"] = t1
     out["duration"] = max(duration, 0.0) if np.isfinite(duration) else np.nan
@@ -227,6 +228,7 @@ def extract_features_from_file(
     window: float,
     overlap: float,
     min_samples: int = 5,
+    file_id: Optional[str] = None,
 ) -> List[Dict]:
     """
     Slide windows over a single file and compute features per window.
@@ -263,7 +265,8 @@ def extract_features_from_file(
 
     feats: List[Dict] = []
     w_start = t_start
-    file_name = os.path.basename(fpath)
+    source_file = os.path.basename(fpath)
+    file_key = file_id or source_file
 
     while w_start + window <= t_end + 1e-9:
         w_end = w_start + window
@@ -271,7 +274,7 @@ def extract_features_from_file(
         df_win = df.loc[mask]
 
         if len(df_win) >= min_samples:
-            feats.append(compute_window_features(df_win, file_name))
+            feats.append(compute_window_features(df_win, file_key, source_file))
 
         w_start += step
 
@@ -331,7 +334,14 @@ def run_feature_extraction(
     all_feats: List[Dict] = []
 
     for fpath in files:
-        feats = extract_features_from_file(fpath, window=window, overlap=overlap)
+        source_file = os.path.basename(fpath)
+        mapping_key = source_file.replace("enriched_", "clean_", 1) if source_file.startswith("enriched_") else source_file
+        feats = extract_features_from_file(
+            fpath,
+            window=window,
+            overlap=overlap,
+            file_id=mapping_key,
+        )
         if feats:
             all_feats.extend(feats)
         else:
@@ -343,7 +353,11 @@ def run_feature_extraction(
     df_feats = pd.DataFrame(all_feats)
     df_out = df_feats.merge(df_map, on="file", how="left")
 
-    meta_cols = ["file", "runner_id", "session_id", "start_s", "end_s", "duration", "n_samples"]
+    missing_rpe = df_out["reported_rpe"].isna().sum() if "reported_rpe" in df_out.columns else len(df_out)
+    if missing_rpe:
+        logger.warning("Mapping data missing for %d windows; check rpe_file_mapping.csv.", missing_rpe)
+
+    meta_cols = ["file", "source_file", "runner_id", "session_id", "start_s", "end_s", "duration", "n_samples"]
     label_cols = ["reported_rpe", "estimated_rpe"]
     other_cols = [c for c in df_out.columns if c not in meta_cols + label_cols]
     df_out = df_out[meta_cols + label_cols + other_cols]
