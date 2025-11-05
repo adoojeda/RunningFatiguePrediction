@@ -8,7 +8,7 @@ FC_mean,0.007135799758480624
 Fatigue_nan_frac,0.0037325721813590952
 Fatigue_std,0.0037325721813590952
 Fatigue_mean,0.0037325721813590952
-reported_rpe,0.0
+source_file,0.0
 AccX_centered_mean,0.0
 AccX_centered_std,0.0
 AccX_centered_mad,0.0
@@ -87,11 +87,11 @@ jerk_rms,0.0
 jerk_skew,0.0
 jerk_kurt,0.0
 jerk_nan_frac,0.0
+reported_rpe,0.0
 n_samples,0.0
 duration,0.0
 end_s,0.0
 start_s,0.0
-session_id,0.0
 FC_nan_frac,0.0
 SpO2_mean,0.0
 SpO2_std,0.0
@@ -99,12 +99,12 @@ SpO2_min,0.0
 SpO2_median,0.0
 SpO2_max,0.0
 SpO2_nan_frac,0.0
+session_id,0.0
 runner_id,0.0
-source_file,0.0
-file,0.0
+fatigue_level,0.0
 Fatigue_Score_window,0.0
 Fatigue_Score,0.0
-Fatigue_component_norm_fc_window,0.0
+file,0.0
 Fatigue_component_norm_fc,0.0
 Fatigue_component_norm_spo2_window,0.0
 Fatigue_component_norm_spo2,0.0
@@ -112,3 +112,4 @@ Fatigue_component_norm_acc_window,0.0
 Fatigue_component_norm_acc,0.0
 Fatigue_component_norm_jerk_window,0.0
 Fatigue_component_norm_jerk,0.0
+Fatigue_component_norm_fc_window,0.0

@@ -401,6 +401,15 @@ def run_feature_extraction(
     if missing_rpe:
         logger.warning("Mapping data missing for %d windows; check rpe_file_mapping.csv.", missing_rpe)
 
+    if "reported_rpe" in df_out.columns:
+        df_out["fatigue_level"] = pd.cut(
+            df_out["reported_rpe"],
+            bins=[0, 5, 8, 11],
+            labels=["low", "medium", "high"],
+            include_lowest=True,
+            right=False,
+        ).astype(str)
+
     meta_cols = ["file", "source_file", "runner_id", "session_id", "start_s", "end_s", "duration", "n_samples"]
     label_cols = ["reported_rpe", "estimated_rpe"]
     other_cols = [c for c in df_out.columns if c not in meta_cols + label_cols]
