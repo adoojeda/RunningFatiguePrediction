@@ -48,6 +48,20 @@ RESULTS_DIR = os.path.join(BASE_DIR, "data", "results")
 DEFAULT_DATASET = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
 DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "eda_figures")
 
+# Centralised metric configuration
+DISTRIBUTION_METRICS: Dict[str, str] = {
+    "Vtr_mean": "Translational velocity per window reflects movement intensity.",
+    "FC_mean": "Average heart rate summarises physiological response to effort.",
+    "Fatigue_Score": "Composite fatigue index derived from biomechanical and physiological signals.",
+}
+
+RPE_RELATIONSHIPS: Dict[str, str] = {
+    "Vtr_mean": "Translational velocity tends to decline as perceived exertion grows.",
+    "FC_mean": "Heart rate rises linearly with RPE, validating physiological response.",
+    "jerk_std": "Movement variability rises with RPE, signalling loss of motor control.",
+    "Fatigue_Score": "Fatigue Score aligns with RPE, bridging objective and subjective fatigue.",
+}
+
 # ======================================================================
 # HELPERS
 # ======================================================================
@@ -150,56 +164,11 @@ def safe_scatter(
     return path
 
 
-def correlation_heatmap(df: pd.DataFrame, output_dir: str) -> Optional[str]:
-    numeric = df.select_dtypes(include=[np.number])
-    if numeric.empty:
-        logger.warning("No numeric columns available for correlation heatmap.")
-        return None
-
-    corr = numeric.corr().replace([np.inf, -np.inf], np.nan).dropna(how="all").dropna(axis=1, how="all")
-    if corr.empty:
-        logger.warning("Correlation matrix is empty after cleaning; skipping heatmap.")
-        return None
-
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(corr, cmap="coolwarm", center=0, annot=False)
-    plt.title("Correlation heatmap (numeric variables)")
-    add_comment("Highlights relationships between biomechanical/physiological variables and perceived exertion.")
-    plt.tight_layout(rect=(0, 0.05, 1, 1))
-    path = os.path.join(output_dir, "heatmap_correlations.png")
-    plt.savefig(path, bbox_inches="tight")
-    plt.close()
-    logger.info("Saved correlation heatmap: %s", path)
-    return path
-
 # ======================================================================
 # EDA ROUTINES
 # ======================================================================
-def describe_dataset(df: pd.DataFrame, output_dir: str) -> List[str]:
-    summary_path = os.path.join(output_dir, "summary_statistics.csv")
-    df.describe().T.to_csv(summary_path)
-    logger.info("Summary statistics saved to %s", summary_path)
-
-    nan_path = os.path.join(output_dir, "nan_statistics.csv")
-    df.isna().mean().sort_values(ascending=False).to_csv(nan_path, header=["nan_fraction"])
-    logger.info("NaN statistics saved to %s", nan_path)
-
-    if "reported_rpe" in df.columns:
-        rpe_path = os.path.join(output_dir, "rpe_distribution.csv")
-        df["reported_rpe"].value_counts(dropna=False).sort_index().to_csv(rpe_path, header=["count"])
-        logger.info("Reported RPE distribution saved to %s", rpe_path)
-        return [summary_path, nan_path, rpe_path]
-
-    return [summary_path, nan_path]
-
-
 def plot_distributions(df: pd.DataFrame, output_dir: str, metrics: Optional[Iterable[str]] = None) -> List[str]:
-    comments = {
-        "Vtr_mean": "Translational velocity per window reflects movement intensity.",
-        "FC_mean": "Average heart rate summarises physiological response to effort.",
-        "jerk_std": "Jerk variability increases with neuromuscular fatigue.",
-        "Fatigue_Score": "Composite fatigue index derived from biomechanical and physiological signals.",
-    }
+    comments = DISTRIBUTION_METRICS
     selected = list(metrics) if metrics else list(comments)
     paths: List[str] = []
     for variable in selected:
@@ -212,16 +181,8 @@ def plot_distributions(df: pd.DataFrame, output_dir: str, metrics: Optional[Iter
     return paths
 
 def plot_rpe_relationships(df: pd.DataFrame, output_dir: str, metrics: Optional[Iterable[str]] = None) -> List[str]:
-    comments = {
-        "Vtr_mean": "Translational velocity tends to decline as perceived exertion grows.",
-        "FC_mean": "Heart rate rises linearly with RPE, validating physiological response.",
-        "jerk_std": "Movement variability rises with RPE, signalling loss of motor control.",
-        "Fatigue_Score": "Fatigue Score aligns with RPE, bridging objective and subjective fatigue.",
-    }
-    if "reported_rpe" not in df.columns:
-        logger.warning("Column 'reported_rpe' not found; skipping RPE relationships.")
-        return []
-
+    comments = RPE_RELATIONSHIPS
+    _ensure_columns(df, ["reported_rpe"])
     selected = list(metrics) if metrics else list(comments)
     paths: List[str] = []
     for variable in selected:
@@ -234,6 +195,7 @@ def plot_rpe_relationships(df: pd.DataFrame, output_dir: str, metrics: Optional[
     return paths
 
 def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[str]:
+    _ensure_columns(df, ["reported_rpe"])
     paths: List[str] = []
     saved = safe_scatter(
         df,
@@ -291,14 +253,23 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
 # ======================================================================
 # ORCHESTRATION
 # ======================================================================
+def _ensure_columns(df: pd.DataFrame, required: Iterable[str]) -> None:
+    """Raise ValueError if any required column is missing."""
+    missing = [col for col in required if col not in df.columns]
+    if missing:
+        raise ValueError(f"Required columns missing from dataset: {missing}")
+
+
 def run_eda(
     dataset_path: str,
     output_dir: str,
     sessions: Optional[List[str]] = None,
     metrics: Optional[List[str]] = None,
     zip_name: Optional[str] = None,
+    clean_after_zip: bool = False,
 ) -> Optional[str]:
-    os.makedirs(output_dir, exist_ok=True)
+    timestamped_dir = os.path.join(output_dir, datetime.now().strftime("eda_%Y%m%d_%H%M%S"))
+    os.makedirs(timestamped_dir, exist_ok=True)
     df = load_features_dataset(path=dataset_path)
     if df is None or df.empty:
         raise ValueError("Feature dataset could not be loaded or is empty.")
@@ -317,13 +288,9 @@ def run_eda(
     metric_list = [m.strip() for m in metrics] if metrics else None
     generated_files: List[str] = []
 
-    generated_files.extend(describe_dataset(df, output_dir))
-    generated_files.extend(plot_distributions(df, output_dir, metrics=metric_list))
-    generated_files.extend(plot_rpe_relationships(df, output_dir, metrics=metric_list))
-    heatmap_path = correlation_heatmap(df, output_dir)
-    if heatmap_path:
-        generated_files.append(heatmap_path)
-    generated_files.extend(plot_specialised_relationships(df, output_dir))
+    generated_files.extend(plot_distributions(df, timestamped_dir, metrics=metric_list))
+    generated_files.extend(plot_rpe_relationships(df, timestamped_dir, metrics=metric_list))
+    generated_files.extend(plot_specialised_relationships(df, timestamped_dir))
 
     # Remove duplicates while preserving order
     seen = set()
@@ -338,14 +305,26 @@ def run_eda(
         base = zip_name if zip_name != "auto" else f"eda_report_{datetime.now():%Y%m%d_%H%M%S}"
         if not base.endswith(".zip"):
             base = f"{base}.zip"
-        zip_path = os.path.join(os.path.dirname(output_dir), base)
+        zip_path = os.path.join(os.path.dirname(timestamped_dir), base)
         with ZipFile(zip_path, "w") as archive:
             for file_path in unique_files:
-                arcname = os.path.relpath(file_path, output_dir) if file_path.startswith(output_dir) else os.path.basename(file_path)
+                arcname = os.path.relpath(file_path, timestamped_dir) if file_path.startswith(timestamped_dir) else os.path.basename(file_path)
                 archive.write(file_path, arcname=arcname)
         logger.info("Zipped report generated at %s", zip_path)
+        if clean_after_zip:
+            for file_path in unique_files:
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            try:
+                os.rmdir(timestamped_dir)
+            except OSError:
+                logger.warning("Could not remove directory %s after cleanup.", timestamped_dir)
+    else:
+        zip_path = None
 
-    logger.info("EDA completed. Figures stored in %s", output_dir)
+    logger.info("EDA completed. Figures stored in %s", timestamped_dir)
     return zip_path
 
 
@@ -382,6 +361,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Create a ZIP archive of generated outputs. Optionally supply the archive name.",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Remove generated figures after creating the ZIP archive (only when --zip is used).",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -393,6 +377,7 @@ if __name__ == "__main__":
             sessions=args.session,
             metrics=args.metrics,
             zip_name=args.zip,
+            clean_after_zip=args.clean,
         )
         if zip_path:
             logger.info("🗜️  Compressed report available at %s", zip_path)
