@@ -41,7 +41,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
-DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset_5s_50olap.parquet")
+DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
 
 
 def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = None) -> List[str]:
@@ -261,7 +261,7 @@ def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True)
 def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
     """
     Load the unified feature dataset for downstream modelling/analysis.
-    Defaults to data/results/features_dataset_5s_50olap.parquet.
+    Defaults to data/results/features_dataset_3s_50olap.parquet.
     """
     try:
         dataset_path = path or DEFAULT_FEATURES_PATH

@@ -59,7 +59,7 @@ class InterpolationConfig:
 
 @dataclass(frozen=True)
 class WindowingConfig:
-    size_seconds: float = _get_float("RFP_WINDOW_SECONDS", 5.0)
+    size_seconds: float = _get_float("RFP_WINDOW_SECONDS", 3.0)
     overlap_ratio: float = _get_float("RFP_WINDOW_OVERLAP", 0.5)
     min_samples: int = _get_int("RFP_WINDOW_MIN_SAMPLES", 5)
 

@@ -21,8 +21,8 @@ This repository processes wearable running signals into modelling- and analysis-
 
 4. **Feature extraction** – `python src/features/features_extraction.py`
    - input: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
-   - output: `data/results/features_dataset_5s_50olap.parquet`
-   - builds sliding-window features aligned with reported RPE values
+   - output: `data/results/features_dataset_3s_50olap.parquet`
+   - builds sliding-window features (3 s, 50 % solape) alineadas con los RPE reportados
 
 5. **Analysis & dashboards** – scripts in `src/analysis/` and `src/app/`
    - generate EDA figures (`eda_features.py`) and interactive views (`dashboard.py`)
