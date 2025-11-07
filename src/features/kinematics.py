@@ -8,9 +8,12 @@ Output: `data/enriched/enriched_*.parquet`
 Next stage: `python src/data/metrics.py`
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from glob import glob
 from typing import Optional
 
@@ -40,21 +43,81 @@ BASE_DIR = PROJECT_ROOT
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 ENRICHED_DIR = os.path.join(BASE_DIR, "data", "enriched")
 
+
+# ======================================================================
+# CUSTOM TYPES
+# ======================================================================
+class KinematicsError(Exception):
+    """Raised when a kinematic transformation fails."""
+
+
+@dataclass
+class KinematicsStats:
+    """Simple structure capturing relevant processing metadata."""
+
+    file: str
+    columns_before: int
+    columns_after: int
+    output_path: str
+
+
 # ======================================================================
 # CORE KINEMATIC FEATURES
 # ======================================================================
 def compute_kinematics(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Ensure centered acceleration and magnitude features are present in the DataFrame.
+    Ensure centred accelerations and magnitude features exist in the frame.
+    """
+    centre_accelerations(df)
+    compute_acceleration_magnitudes(df)
+    return df
+
+
+def _load_processed_session(path: str) -> pd.DataFrame:
+    """Load a processed parquet file and validate its schema."""
+    df = pd.read_parquet(path)
+    validate_dataframe(df, "processed")
+    return df
+
+
+def _write_enriched_session(df: pd.DataFrame, source_path: str, overwrite: bool) -> str:
+    """Persist the dataframe to the enriched directory (or overwrite the source)."""
+    validate_dataframe(df, "enriched")
+    if overwrite:
+        output_path = source_path
+    else:
+        base = os.path.basename(source_path).replace("clean_", "enriched_")
+        output_path = os.path.join(ENRICHED_DIR, base)
+    df.to_parquet(output_path, index=False)
+    return output_path
+
+
+def process_single_file(path: str, *, overwrite: bool = False) -> Optional[KinematicsStats]:
+    """
+    Load → enrich → save a single session. Returns stats or None on failure.
     """
     try:
-        centre_accelerations(df)
-        compute_acceleration_magnitudes(df)
-        return df
-
+        df = _load_processed_session(path)
+        before_cols = len(df.columns)
+        df = compute_kinematics(df)
+        output_path = _write_enriched_session(df, path, overwrite)
+        stats = KinematicsStats(
+            file=os.path.basename(path),
+            columns_before=before_cols,
+            columns_after=len(df.columns),
+            output_path=output_path,
+        )
+        logger.info(
+            "Kinematic features written to %s (columns: %d → %d)",
+            os.path.basename(output_path),
+            stats.columns_before,
+            stats.columns_after,
+        )
+        return stats
     except Exception as exc:
-        logger.error("Error computing kinematic features: %s", exc, exc_info=True)
-        return df
+        logger.error("Failed to process %s: %s", os.path.basename(path), exc, exc_info=True)
+        return None
+
 
 # ======================================================================
 # BATCH PROCESSING
@@ -80,34 +143,14 @@ def process_all_kinematics(overwrite: bool = False) -> Optional[int]:
 
     os.makedirs(ENRICHED_DIR, exist_ok=True)
 
-    processed_count = 0
+    processed = 0
     for path in files:
-        try:
-            df = pd.read_parquet(path)
-            validate_dataframe(df, "processed")
-            before_cols = len(df.columns)
-            df = compute_kinematics(df)
-            validate_dataframe(df, "enriched")
-            after_cols = len(df.columns)
+        stats = process_single_file(path, overwrite=overwrite)
+        if stats:
+            processed += 1
 
-            if overwrite:
-                output_path = path
-            else:
-                base = os.path.basename(path).replace("clean_", "enriched_")
-                output_path = os.path.join(ENRICHED_DIR, base)
+    return processed
 
-            df.to_parquet(output_path, index=False)
-            processed_count += 1
-            logger.info(
-                "Kinematic features written to %s (columns: %s → %s)",
-                os.path.basename(output_path),
-                before_cols,
-                after_cols,
-            )
-        except Exception as exc:
-            logger.error("Failed to process %s: %s", path, exc, exc_info=True)
-
-    return processed_count
 
 # ======================================================================
 # MAIN

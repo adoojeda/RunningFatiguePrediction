@@ -123,7 +123,7 @@ def highpass_filter(
     b, a = butter(order, normal_cutoff, btype="high", analog=False)
     try:
         return filtfilt(b, a, array, method="gust")
-    except Exception:  # pragma: no cover - fallback path
+    except Exception:  
         return filtfilt(b, a, array)
 
 
