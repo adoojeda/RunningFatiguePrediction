@@ -13,7 +13,7 @@ import os
 import sys
 import logging
 from glob import glob
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -23,6 +23,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from src.config import get_config
 from src.utils.kinematics import (
     DEFAULT_FS,
     DEFAULT_HP_CUTOFF,
@@ -31,6 +32,7 @@ from src.utils.kinematics import (
     compute_translational_velocity,
     compute_jerk,
 )
+from src.utils.schemas import validate_dataframe
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -53,14 +55,14 @@ RESULTS_DIR = os.path.join(DATA_DIR, "results")
 OUTPUT_PARQUET = os.path.join(RESULTS_DIR, "all_sessions_metrics.parquet")
 
 # ======================================================================
+CFG = get_config()
+
+# ======================================================================
 # FATIGUE SCORE PARAMETERS
 # ======================================================================
-WEIGHTS = {
-    "jerk": 0.35,
-    "acc": 0.25,
-    "fc": 0.25,
-    "spo2": 0.15,
-}
+WEIGHTS = dict(CFG.fatigue_weights.weights)
+
+DEFAULT_FATIGUE_REFERENCES: Dict[str, float] = dict(CFG.fatigue_refs.references)
 
 
 # ======================================================================
@@ -95,43 +97,125 @@ def compute_session_metrics(df: pd.DataFrame) -> dict:
         logger.error("❌ Error computing session metrics: %s", exc, exc_info=True)
         return metrics
 
+
+# ======================================================================
+# FATIGUE REFERENCES
+# ======================================================================
+def _safe_percentile(series: pd.Series, q: float) -> float:
+    """Percentile helper resilient to NaNs and empty inputs."""
+    values = pd.to_numeric(series, errors="coerce")
+    if values.notna().sum() == 0:
+        return np.nan
+    return float(np.nanpercentile(values.to_numpy(dtype=float), q))
+
+
+def _safe_std(series: pd.Series) -> float:
+    """Standard deviation helper resilient to NaNs and empty inputs."""
+    values = pd.to_numeric(series, errors="coerce")
+    if values.notna().sum() < 2:
+        return np.nan
+    return float(np.nanstd(values.to_numpy(dtype=float), ddof=1))
+
+
+def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
+    """
+    Estimate fatigue normalisation references from a session dataframe.
+
+    These references contextualise window-level scores with session-specific
+    baselines instead of relying solely on global defaults.
+    """
+    refs = DEFAULT_FATIGUE_REFERENCES.copy()
+
+    try:
+        if "FC" in df.columns:
+            fc_95 = _safe_percentile(df["FC"], 95)
+            if np.isfinite(fc_95):
+                refs["fc_max"] = max(fc_95, 1e-6)
+
+        if "SpO2" in df.columns:
+            spo2_05 = _safe_percentile(df["SpO2"], 5)
+            if np.isfinite(spo2_05):
+                refs["spo2_min"] = min(spo2_05, refs["spo2_min"])
+
+        if "Acc_mag" in df.columns:
+            acc_std = _safe_std(df["Acc_mag"])
+            if np.isfinite(acc_std):
+                refs["acc_std_ref"] = max(acc_std, 1e-6)
+
+        if "jerk_mag" in df.columns:
+            jerk_std = _safe_std(df["jerk_mag"])
+            if np.isfinite(jerk_std):
+                refs["jerk_std_ref"] = max(jerk_std, 1e-6)
+
+    except Exception as exc:
+        logger.warning("⚠️ Failed to derive fatigue references: %s", exc, exc_info=True)
+
+    return refs
+
 # ======================================================================
 # FATIGUE SCORE
 # ======================================================================
 def compute_fatigue_score(
     metrics: dict,
-    fc_max: float = 200.0,
-    spo2_min: float = 90.0,
-    acc_std_ref: float = 5.0,
-    jerk_std_ref: float = 50.0,
+    *,
+    context: str = "session",
+    references: Optional[Dict[str, float]] = None,
+    weights: Optional[Dict[str, float]] = None,
     adaptive: bool = True,
 ) -> dict:
-    """Compute the composite fatigue score with configurable weights."""
+    """Compute the composite fatigue score with configurable weights and references."""
     if not metrics:
         return {"Fatigue_Score": np.nan}
 
     try:
-        norm_fc = np.clip(metrics.get("FC_mean", 0) / fc_max, 0, 1)
+        if context not in {"session", "window"}:
+            raise ValueError(f"Invalid context '{context}'. Expected 'session' or 'window'.")
+
+        params = DEFAULT_FATIGUE_REFERENCES.copy()
+        if references:
+            params.update({k: v for k, v in references.items() if v is not None and np.isfinite(v)})
+
+        weight_cfg = WEIGHTS.copy()
+        if weights:
+            weight_cfg.update({k: v for k, v in weights.items() if k in weight_cfg})
+
+        fc_denominator = max(params["fc_max"], 1e-6)
+        norm_fc = np.clip(metrics.get("FC_mean", 0.0) / fc_denominator, 0.0, 1.0)
+
+        spo2_denominator = max(100.0 - params["spo2_min"], 1e-6)
         norm_spo2 = np.clip(
-            1 - ((metrics.get("SpO2_mean", 100) - spo2_min) / (100 - spo2_min)), 0, 1
+            1.0 - ((metrics.get("SpO2_mean", 100.0) - params["spo2_min"]) / spo2_denominator),
+            0.0,
+            1.0,
         )
-        acc_std = metrics.get("Acc_std", 0)
-        jerk_std = metrics.get("jerk_std", 0)
 
-        if adaptive:
-            acc_std_max = max(acc_std * 1.2, acc_std_ref)
-            jerk_std_max = max(jerk_std * 1.2, jerk_std_ref)
+        acc_std = metrics.get("Acc_std", np.nan)
+        jerk_std = metrics.get("jerk_std", np.nan)
+
+        if context == "window":
+            acc_ref = max(params["acc_std_ref"], 1e-6)
+            jerk_ref = max(params["jerk_std_ref"], 1e-6)
+            norm_acc = np.clip(acc_std / acc_ref, 0.0, 1.0) if np.isfinite(acc_std) else 0.0
+            norm_jerk = np.clip(jerk_std / jerk_ref, 0.0, 1.0) if np.isfinite(jerk_std) else 0.0
         else:
-            acc_std_max, jerk_std_max = acc_std_ref, jerk_std_ref
-
-        norm_acc = np.clip(acc_std / acc_std_max, 0, 1)
-        norm_jerk = np.clip(jerk_std / jerk_std_max, 0, 1)
+            acc_std_max = params["acc_std_ref"]
+            jerk_std_max = params["jerk_std_ref"]
+            if adaptive and np.isfinite(acc_std):
+                acc_std_max = max(acc_std * 1.2, acc_std_max)
+            if adaptive and np.isfinite(jerk_std):
+                jerk_std_max = max(jerk_std * 1.2, jerk_std_max)
+            norm_acc = (
+                np.clip(acc_std / max(acc_std_max, 1e-6), 0.0, 1.0) if np.isfinite(acc_std) else 0.0
+            )
+            norm_jerk = (
+                np.clip(jerk_std / max(jerk_std_max, 1e-6), 0.0, 1.0) if np.isfinite(jerk_std) else 0.0
+            )
 
         fatigue = (
-            WEIGHTS["jerk"] * norm_jerk
-            + WEIGHTS["acc"] * norm_acc
-            + WEIGHTS["fc"] * norm_fc
-            + WEIGHTS["spo2"] * norm_spo2
+            weight_cfg["jerk"] * norm_jerk
+            + weight_cfg["acc"] * norm_acc
+            + weight_cfg["fc"] * norm_fc
+            + weight_cfg["spo2"] * norm_spo2
         )
 
         metrics["Fatigue_Score"] = round(float(fatigue), 3)
@@ -140,6 +224,12 @@ def compute_fatigue_score(
             "norm_spo2": round(norm_spo2, 3),
             "norm_acc": round(norm_acc, 3),
             "norm_jerk": round(norm_jerk, 3),
+        }
+        metrics["Fatigue_references"] = {
+            "fc_max": round(params["fc_max"], 3),
+            "spo2_min": round(params["spo2_min"], 3),
+            "acc_std_ref": round(params["acc_std_ref"], 3),
+            "jerk_std_ref": round(params["jerk_std_ref"], 3),
         }
         return metrics
 
@@ -185,6 +275,8 @@ def process_all_sessions(
     for path in files:
         try:
             df = pd.read_parquet(path)
+            schema_name = "enriched" if os.path.basename(path).startswith("enriched_") else "processed"
+            validate_dataframe(df, schema_name)
             df = centre_accelerations(df)
             df = compute_acceleration_magnitudes(df)
             df = compute_translational_velocity(
@@ -195,7 +287,12 @@ def process_all_sessions(
             df = compute_jerk(df)
 
             session_metrics = compute_session_metrics(df)
-            session_metrics = compute_fatigue_score(session_metrics)
+            references = derive_fatigue_references(df)
+            session_metrics = compute_fatigue_score(
+                session_metrics,
+                context="session",
+                references=references,
+            )
 
             fatigue_score = session_metrics.get("Fatigue_Score")
             if fatigue_score is not None and np.isfinite(fatigue_score):

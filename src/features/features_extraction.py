@@ -26,8 +26,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.utils.kinematics import DEFAULT_VTR_SMOOTHING
-from src.data.metrics import compute_fatigue_score
+from src.config import get_config
+from src.data.metrics import compute_fatigue_score, derive_fatigue_references
+from src.utils.schemas import validate_dataframe
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -50,6 +51,8 @@ RAW_DIR = os.path.join(DATA_DIR, "raw")
 MAPPING_PATH = os.path.join(RAW_DIR, "rpe_file_mapping.csv")
 DEFAULT_OUTPUT = os.path.join(RESULTS_DIR, "features_dataset_5s_50olap.parquet")
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+CFG = get_config()
 
 # ======================================================================
 # STATISTICAL UTILITIES
@@ -114,7 +117,12 @@ def _nanmax(x: np.ndarray) -> float:
 # ======================================================================
 # WINDOW-LEVEL FEATURE COMPUTATION
 # ======================================================================
-def compute_window_features(df_win: pd.DataFrame, file_id: str, source_file: str) -> Dict:
+def compute_window_features(
+    df_win: pd.DataFrame,
+    file_id: str,
+    source_file: str,
+    fatigue_refs: Optional[Dict[str, float]] = None,
+) -> Dict:
     """
     Compute statistics for an already segmented window (df_win).
     Returns a dictionary containing features and metadata.
@@ -249,7 +257,11 @@ def compute_window_features(df_win: pd.DataFrame, file_id: str, source_file: str
         metrics_payload["jerk_std"] = float(jerk_std)
 
     if metrics_payload:
-        score_dict = compute_fatigue_score(metrics_payload.copy())
+        score_dict = compute_fatigue_score(
+            metrics_payload.copy(),
+            context="window",
+            references=fatigue_refs,
+        )
         fatigue_score = score_dict.get("Fatigue_Score")
         if fatigue_score is not None and np.isfinite(fatigue_score):
             out["Fatigue_Score_window"] = fatigue_score
@@ -271,7 +283,7 @@ def extract_features_from_file(
     fpath: str,
     window: float,
     overlap: float,
-    min_samples: int = 5,
+    min_samples: int = CFG.windows.min_samples,
     file_id: Optional[str] = None,
 ) -> List[Dict]:
     """
@@ -281,6 +293,13 @@ def extract_features_from_file(
         df = pd.read_parquet(fpath)
     except Exception as exc:
         logger.error("Error reading %s: %s", os.path.basename(fpath), exc, exc_info=True)
+        return []
+
+    schema_name = "enriched" if os.path.basename(fpath).startswith("enriched_") else "processed"
+    try:
+        validate_dataframe(df, schema_name)
+    except ValueError as exc:
+        logger.error("Schema validation failed for %s: %s", os.path.basename(fpath), exc)
         return []
 
     if "Relative_Time" not in df.columns:
@@ -295,6 +314,8 @@ def extract_features_from_file(
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    fatigue_refs = derive_fatigue_references(df)
 
     t_start = float(df["Relative_Time"].min())
     t_end = float(df["Relative_Time"].max())
@@ -318,7 +339,14 @@ def extract_features_from_file(
         df_win = df.loc[mask]
 
         if len(df_win) >= min_samples:
-            feats.append(compute_window_features(df_win, file_key, source_file))
+            feats.append(
+                compute_window_features(
+                    df_win,
+                    file_key,
+                    source_file,
+                    fatigue_refs=fatigue_refs,
+                )
+            )
 
         w_start += step
 
@@ -431,8 +459,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Sliding-window feature extraction for running fatigue analysis."
     )
-    parser.add_argument("--window", type=float, default=5.0, help="Window size in seconds (default: 5.0).")
-    parser.add_argument("--overlap", type=float, default=0.5, help="Window overlap ratio [0, 1) (default: 0.5).")
+    parser.add_argument(
+        "--window",
+        type=float,
+        default=CFG.windows.size_seconds,
+        help=f"Tamaño de ventana en segundos (default: {CFG.windows.size_seconds}).",
+    )
+    parser.add_argument(
+        "--overlap",
+        type=float,
+        default=CFG.windows.overlap_ratio,
+        help=f"Solape de la ventana [0,1) (default: {CFG.windows.overlap_ratio}).",
+    )
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output path for the feature dataset.")
     parser.add_argument("--source", type=str, default=None, help="Optional directory to read input parquet files from.")
     return parser.parse_args()

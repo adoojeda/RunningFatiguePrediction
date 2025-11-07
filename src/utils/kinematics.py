@@ -22,7 +22,6 @@ Environment flags
 from __future__ import annotations
 
 import logging
-import os
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -30,14 +29,17 @@ import pandas as pd
 from scipy import integrate
 from scipy.signal import butter, filtfilt
 
+from src.config import get_config
+
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # Configuration knobs (read from environment when available)
 # ----------------------------------------------------------------------
-DEFAULT_FS: float = float(os.getenv("RFP_DEFAULT_FS", 50.0))
-DEFAULT_HP_CUTOFF: float = float(os.getenv("RFP_HP_CUTOFF", 0.3))
-DEFAULT_VTR_SMOOTHING: int = int(os.getenv("RFP_VTR_SMOOTHING", 10))
+CFG = get_config()
+DEFAULT_FS: float = CFG.sampling.default_fs
+DEFAULT_HP_CUTOFF: float = CFG.sampling.highpass_cutoff
+DEFAULT_VTR_SMOOTHING: int = CFG.sampling.vtr_smoothing
 
 
 # ----------------------------------------------------------------------
@@ -188,7 +190,21 @@ def compute_jerk(
         logger.warning("Not enough samples to compute jerk.")
         return df
 
-    dt = np.gradient(t)
+    if np.any(~np.isfinite(t)):
+        logger.warning("Time vector contains non-finite values; jerk set to NaN.")
+        for axis in axes:
+            df[f"{jerk_prefix}{axis}"] = np.nan
+        df[jerk_mag_col] = np.nan
+        return df
+
+    diffs = np.diff(t)
+    if np.any(diffs <= 0):
+        logger.warning("Time vector is not strictly increasing; jerk set to NaN.")
+        for axis in axes:
+            df[f"{jerk_prefix}{axis}"] = np.nan
+        df[jerk_mag_col] = np.nan
+        return df
+
     jerks = {}
     for axis in axes:
         col = f"{accel_prefix}{axis}{centred_suffix}"
@@ -196,7 +212,19 @@ def compute_jerk(
             logger.warning("Skipping jerk computation for %s (column missing).", col)
             df[f"{jerk_prefix}{axis}"] = np.nan
             continue
-        jerks[axis] = np.gradient(df[col], dt)
+        values = df[col].to_numpy(dtype=float)
+        if np.isnan(values).all():
+            logger.warning("All samples are NaN for %s; jerk set to NaN.", col)
+            df[f"{jerk_prefix}{axis}"] = np.nan
+            continue
+
+        if np.isnan(values).any():
+            idx = np.arange(values.size)
+            valid = ~np.isnan(values)
+            values = np.interp(idx, idx[valid], values[valid])
+
+        edge_order = 2 if values.size >= 3 else 1
+        jerks[axis] = np.gradient(values, t, edge_order=edge_order)
         df[f"{jerk_prefix}{axis}"] = jerks[axis]
 
     valid_axes = [axis for axis in axes if axis in jerks]

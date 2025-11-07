@@ -22,6 +22,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.utils.kinematics import centre_accelerations, compute_acceleration_magnitudes
+from src.utils.schemas import validate_dataframe
 
 # ======================================================================
 # LOGGING CONFIGURATION
@@ -83,8 +84,10 @@ def process_all_kinematics(overwrite: bool = False) -> Optional[int]:
     for path in files:
         try:
             df = pd.read_parquet(path)
+            validate_dataframe(df, "processed")
             before_cols = len(df.columns)
             df = compute_kinematics(df)
+            validate_dataframe(df, "enriched")
             after_cols = len(df.columns)
 
             if overwrite:
