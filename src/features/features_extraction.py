@@ -95,13 +95,6 @@ def _iqr(x: np.ndarray) -> float:
     q75, q25 = np.percentile(x, [75, 25])
     return float(q75 - q25)
 
-def _rms(x: np.ndarray) -> float:
-    "Root-mean-square magnitude summarising overall signal energy."
-    x = x[~np.isnan(x)]
-    if x.size == 0:
-        return np.nan
-    return float(np.sqrt(np.mean(x**2)))
-
 def _skew(x: np.ndarray) -> float:
     "Distribution skewness; deviations may reveal asymmetries in running form."
     x = x[~np.isnan(x)]
@@ -208,12 +201,8 @@ def compute_window_features(
     out["file"] = file_id
     out["source_file"] = source_file
     out["start_s"] = t0
-    out["end_s"] = t1
     out["duration"] = max(duration, 0.0) if np.isfinite(duration) else np.nan
     out["n_samples"] = int(len(df_win))
-
-    def _nan_fraction(col: str) -> float:
-        return float(df_win[col].isna().mean()) if col in df_win.columns else np.nan
 
     # Centered accelerations
     for axis in ["X", "Y", "Z"]:
@@ -223,33 +212,17 @@ def compute_window_features(
             out[f"{col}_mean"] = np.nanmean(x)
             out[f"{col}_std"] = np.nanstd(x, ddof=1)
             out[f"{col}_mad"] = _mad(x)
-            out[f"{col}_min"] = _nanmin(x)
-            out[f"{col}_p25"] = np.nanpercentile(x, 25)
-            out[f"{col}_median"] = np.nanmedian(x)
-            out[f"{col}_p75"] = np.nanpercentile(x, 75)
-            out[f"{col}_max"] = _nanmax(x)
-            out[f"{col}_iqr"] = _iqr(x)
-            out[f"{col}_rms"] = _rms(x)
             out[f"{col}_skew"] = _skew(x)
             out[f"{col}_kurt"] = _kurtosis(x)
-            out[f"{col}_nan_frac"] = _nan_fraction(col)
 
     # Raw acceleration magnitude
     if "Acc_mag" in df_win.columns:
         x = df_win["Acc_mag"].to_numpy(dtype=float)
-        out["Acc_mag_mean"] = np.nanmean(x)
-        out["Acc_mag_std"] = np.nanstd(x, ddof=1)
+        out["Acc_mean"] = np.nanmean(x)
+        out["Acc_std"] = np.nanstd(x, ddof=1)
         out["Acc_mag_mad"] = _mad(x)
-        out["Acc_mag_min"] = _nanmin(x)
-        out["Acc_mag_median"] = np.nanmedian(x)
-        out["Acc_mag_max"] = _nanmax(x)
-        out["Acc_mag_iqr"] = _iqr(x)
-        out["Acc_mag_rms"] = _rms(x)
         out["Acc_mag_skew"] = _skew(x)
         out["Acc_mag_kurt"] = _kurtosis(x)
-        out["Acc_mag_nan_frac"] = _nan_fraction("Acc_mag")
-        out["Acc_mean"] = out.get("Acc_mag_mean")
-        out["Acc_std"] = out.get("Acc_mag_std")
 
     # Translational velocity magnitude
     if "Vtr" in df_win.columns:
@@ -257,16 +230,8 @@ def compute_window_features(
         out["Vtr_mean"] = np.nanmean(v)
         out["Vtr_std"] = np.nanstd(v, ddof=1)
         out["Vtr_mad"] = _mad(v)
-        out["Vtr_min"] = _nanmin(v)
-        out["Vtr_p25"] = np.nanpercentile(v, 25)
-        out["Vtr_median"] = np.nanmedian(v)
-        out["Vtr_p75"] = np.nanpercentile(v, 75)
-        out["Vtr_max"] = _nanmax(v)
-        out["Vtr_iqr"] = _iqr(v)
-        out["Vtr_rms"] = _rms(v)
         out["Vtr_skew"] = _skew(v)
         out["Vtr_kurt"] = _kurtosis(v)
-        out["Vtr_nan_frac"] = _nan_fraction("Vtr")
 
     # Jerk magnitude
     if "jerk_mag" in df_win.columns:
@@ -274,46 +239,19 @@ def compute_window_features(
         out["jerk_mean"] = np.nanmean(j)
         out["jerk_std"] = np.nanstd(j, ddof=1)
         out["jerk_mad"] = _mad(j)
-        out["jerk_min"] = _nanmin(j)
-        out["jerk_p25"] = np.nanpercentile(j, 25)
-        out["jerk_median"] = np.nanmedian(j)
-        out["jerk_p75"] = np.nanpercentile(j, 75)
-        out["jerk_max"] = _nanmax(j)
-        out["jerk_iqr"] = _iqr(j)
-        out["jerk_rms"] = _rms(j)
         out["jerk_skew"] = _skew(j)
-        out["jerk_kurt"] = _kurtosis(j)
-        out["jerk_nan_frac"] = _nan_fraction("jerk_mag")
 
     # Heart rate (FC)
     if "FC" in df_win.columns:
         f = df_win["FC"].to_numpy(dtype=float)
-        mean, std, median = _safe_stats(f)
+        mean, _, _ = _safe_stats(f)
         out["FC_mean"] = mean
-        out["FC_std"] = std
-        out["FC_min"] = _nanmin(f)
-        out["FC_median"] = median
-        out["FC_max"] = _nanmax(f)
-        out["FC_nan_frac"] = _nan_fraction("FC")
 
     # Oxygen saturation (SpO₂)
     if "SpO2" in df_win.columns:
         s = df_win["SpO2"].to_numpy(dtype=float)
-        mean, std, median = _safe_stats(s)
+        mean, _, _ = _safe_stats(s)
         out["SpO2_mean"] = mean
-        out["SpO2_std"] = std
-        out["SpO2_min"] = _nanmin(s)
-        out["SpO2_median"] = median
-        out["SpO2_max"] = _nanmax(s)
-        out["SpO2_nan_frac"] = _nan_fraction("SpO2")
-
-    # Fatigue score
-    if "Fatigue_Score" in df_win.columns:
-        fs = df_win["Fatigue_Score"].to_numpy(dtype=float)
-        mean, std, _ = _safe_stats(fs)
-        out["Fatigue_mean"] = mean
-        out["Fatigue_std"] = std
-        out["Fatigue_nan_frac"] = _nan_fraction("Fatigue_Score")
 
     # Compute fatigue score per window using available metrics
     metrics_payload = {}
@@ -338,14 +276,13 @@ def compute_window_features(
         )
         fatigue_score = score_dict.get("Fatigue_Score")
         if fatigue_score is not None and np.isfinite(fatigue_score):
-            out["Fatigue_Score_window"] = fatigue_score
-            # Backwards-compatible column name expected by downstream scripts/EDA
             out["Fatigue_Score"] = fatigue_score
             components = score_dict.get("Fatigue_components", {})
             for key, value in components.items():
+                if key == "norm_spo2":
+                    continue
                 if value is None or not np.isfinite(value):
                     continue
-                out[f"Fatigue_component_{key}_window"] = value
                 out[f"Fatigue_component_{key}"] = value
 
     return out
@@ -412,7 +349,7 @@ def load_rpe_mapping(path: str) -> pd.DataFrame:
         raise FileNotFoundError(f"RPE mapping not found at: {path}")
 
     df_map = pd.read_csv(path)
-    expected_cols = {"file", "runner_id", "session_id", "reported_rpe", "estimated_rpe"}
+    expected_cols = {"file", "runner_id", "session_id", "reported_rpe"}
     missing = expected_cols - set(df_map.columns)
     if missing:
         raise ValueError(f"Missing columns in rpe_file_mapping.csv: {missing}")
@@ -489,8 +426,8 @@ def run_feature_extraction(
             right=False,
         ).astype(str)
 
-    meta_cols = ["file", "source_file", "runner_id", "session_id", "start_s", "end_s", "duration", "n_samples"]
-    label_cols = ["reported_rpe", "estimated_rpe"]
+    meta_cols = ["file", "source_file", "runner_id", "session_id", "start_s", "duration", "n_samples"]
+    label_cols = ["reported_rpe"]
     other_cols = [c for c in df_out.columns if c not in meta_cols + label_cols]
     df_out = df_out[meta_cols + label_cols + other_cols]
 

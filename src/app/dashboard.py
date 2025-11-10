@@ -91,7 +91,7 @@ def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
         "rows": f"{len(df):,}",
         "duration": f"{duration:.1f} s" if duration else "N/A",
     }
-    for col in ("runner_id", "session_id", "reported_rpe", "estimated_rpe"):
+    for col in ("runner_id", "session_id", "reported_rpe"):
         if col in df.columns:
             unique_vals = df[col].dropna().unique()
             if unique_vals.size == 1:
