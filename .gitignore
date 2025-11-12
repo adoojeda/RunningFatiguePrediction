@@ -34,13 +34,6 @@ data/results/*
 !data/results/eda_figures/*.png
 !data/results/eda_figures/*.csv
 
-# Machine learning
-models/
-*.h5
-*.pkl
-*.joblib
-*.sav
-
 # Documents and temporary files
 *.pdf
 *.docx

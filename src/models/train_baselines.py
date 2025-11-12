@@ -1,18 +1,18 @@
 """
-Entrenamiento y evaluación de modelos base para la predicción de fatiga/RPE.
+Baseline training and evaluation for fatigue/RPE prediction.
 
-Uso típico:
+Typical usage:
     python src/models/train_baselines.py \
         --dataset data/results/features_dataset_3s_50olap.parquet \
         --target reported_rpe \
         --group session_id
 
-El script:
-    - carga el dataset de ventanas generado en la etapa 4,
-    - separa entrenamiento y prueba respetando agrupaciones (sesión/corredor),
-    - entrena varios modelos sencillos,
-    - reporta MAE, RMSE y R² en validación cruzada y en el conjunto hold-out,
-    - guarda un resumen en data/results/modeling/.
+The script:
+    - loads the 3 s window dataset generated in stage 4,
+    - performs grouped train/test splits (session/runner),
+    - trains a handful of simple models,
+    - reports MAE, RMSE and R² for cross-validation and hold-out,
+    - saves a summary under data/results/modeling/.
 """
 
 from __future__ import annotations
@@ -95,7 +95,6 @@ FEATURE_WHITELIST = [
     "jerk_skew",
 ]
 
-
 @dataclass
 class MetricsReport:
     model: str
@@ -105,7 +104,6 @@ class MetricsReport:
     rmse: float
     r2: float
     samples: int
-
 
 @dataclass(frozen=True)
 class TrainingConfig:
@@ -120,68 +118,66 @@ class TrainingConfig:
     save_predictions: bool = False
     use_whitelist: bool = True
 
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Modelado base para fatiga/RPE.")
+    parser = argparse.ArgumentParser(description="Baseline training and evaluation for fatigue/RPE prediction.")
     parser.add_argument(
         "--dataset",
         type=Path,
         default=DEFAULT_DATASET,
-        help=f"Ruta al parquet de características (default: {DEFAULT_DATASET}).",
+        help=f"Path to the feature parquet (default: {DEFAULT_DATASET}).",
     )
     parser.add_argument(
         "--target",
         type=str,
         default="reported_rpe",
-        help="Columna objetivo a predecir.",
+        help="Target column to predict.",
     )
     parser.add_argument(
         "--group",
         type=str,
         default="session_id",
-        help="Columna para agrupar (evita fuga entre train/test).",
+        help="Column to use for grouped splitting (e.g., session_id or runner_id).",
     )
     parser.add_argument(
         "--test-size",
         type=float,
         default=0.2,
-        help="Proporción para el conjunto de prueba hold-out.",
+        help="Hold-out test proportion.",
     )
     parser.add_argument(
         "--cv-folds",
         type=int,
         default=5,
-        help="Número de folds de validación cruzada agrupada. Usar 1 para desactivar.",
+        help="Number of GroupKFold splits (use 1 to disable CV).",
     )
     parser.add_argument(
         "--seed",
         type=int,
         default=42,
-        help="Semilla para la división aleatoria.",
+        help="Random seed.",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help=f"Directorio donde guardar resultados (default: {DEFAULT_OUTPUT_DIR}).",
+        help=f"Directory to save results (default: {DEFAULT_OUTPUT_DIR}).",
     )
     parser.add_argument(
         "--models",
         nargs="+",
-        help="Lista opcional de modelos a entrenar (por nombre: gradient_boosting, random_forest, linear).",
+        help="Optional list of models to run (default: all). Supported: gradient_boosting, random_forest, linear_regression.",
     )
     parser.add_argument(
         "--save-predictions",
         action="store_true",
-        help="Guardar predicciones del conjunto de test por modelo.",
+        help="Save test set predictions for each model.",
     )
     parser.add_argument(
         "--no-feature-whitelist",
         action="store_true",
-        help="Usar todas las columnas numéricas (sin aplicar la lista depurada de features).",
+        help="Use all numeric columns (skip the curated feature whitelist).",
     )
     return parser.parse_args()
-
 
 def build_config(args: argparse.Namespace) -> TrainingConfig:
     return TrainingConfig(
@@ -197,14 +193,12 @@ def build_config(args: argparse.Namespace) -> TrainingConfig:
         use_whitelist=not args.no_feature_whitelist,
     )
 
-
 def load_dataset(path: Path) -> pd.DataFrame:
     if not path.exists():
-        raise FileNotFoundError(f"No se encuentra el dataset en {path}")
+        raise FileNotFoundError(f"Dataset file not found: {path}")
     df = pd.read_parquet(path)
-    logger.info("Dataset cargado (%d filas, %d columnas).", len(df), len(df.columns))
+    logger.info("Dataset loaded from %s with shape %s", path, df.shape)
     return df
-
 
 def prepare_features(
     df: pd.DataFrame,
@@ -213,7 +207,7 @@ def prepare_features(
     feature_whitelist: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, pd.Series]:
     if target not in df.columns:
-        raise KeyError(f"La columna objetivo '{target}' no está presente en el dataset.")
+        raise KeyError(f"Target column '{target}' not present in dataset.")
 
     df = df.copy()
     y = pd.to_numeric(df[target], errors="coerce")
@@ -229,15 +223,15 @@ def prepare_features(
         available = [col for col in feature_whitelist if col in df.columns]
         missing = [col for col in feature_whitelist if col not in df.columns]
         if missing:
-            logger.warning("Las siguientes columnas del whitelist no están en el dataset y se omitirán: %s", missing)
+            logger.warning("Whitelist columns missing from dataset and will be skipped: %s", missing)
         if available:
             df = df[available]
         else:
-            logger.warning("El whitelist no tiene columnas válidas; se usarán todas las numéricas.")
+            logger.warning("Whitelist yielded no valid columns; falling back to all numeric columns.")
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not numeric_cols:
-        raise ValueError("No se encontraron columnas numéricas para entrenar.")
+        raise ValueError("No numeric columns available for training.")
 
     X = df[numeric_cols]
 
@@ -245,20 +239,18 @@ def prepare_features(
     X = X.loc[mask]
     y = y.loc[mask]
 
-    logger.info("Caracteres finales: %d columnas numéricas. Filas tras limpieza: %d.", X.shape[1], X.shape[0])
+    logger.info("Final shape: %d numeric columns, %d rows after cleaning.", X.shape[1], X.shape[0])
     return X, y
-
 
 def select_groups(df: pd.DataFrame, group_col: str, fallback: str = "file") -> pd.Series:
     if group_col in df.columns:
         groups = df[group_col].astype(str)
     elif fallback in df.columns:
-        logger.warning("Columna '%s' no encontrada. Usando '%s' como agrupador.", group_col, fallback)
+        logger.warning("Column '%s' not found; falling back to '%s' for grouping.", group_col, fallback)
         groups = df[fallback].astype(str)
     else:
-        raise KeyError(f"No se pudo localizar '{group_col}' ni '{fallback}' para agrupar.")
+        raise KeyError(f"No suitable grouping column found ('{group_col}' or '{fallback}').")
     return groups
-
 
 def build_models(random_state: int) -> Dict[str, Pipeline]:
     numeric_transformer = Pipeline(
@@ -302,7 +294,6 @@ def build_models(random_state: int) -> Dict[str, Pipeline]:
     }
     return models
 
-
 def evaluate(
     y_true: np.ndarray,
     y_pred: np.ndarray,
@@ -316,7 +307,6 @@ def evaluate(
     r2 = r2_score(y_true, y_pred)
     return MetricsReport(model=model_name, fold=fold, split=split, mae=mae, rmse=rmse, r2=r2, samples=len(y_true))
 
-
 def group_split(
     X: pd.DataFrame,
     y: pd.Series,
@@ -328,14 +318,13 @@ def group_split(
     splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
     train_idx, test_idx = next(splitter.split(X, y, groups))
     logger.info(
-        "Division grupos -> train: %d filas (%d grupos), test: %d filas (%d grupos).",
+        "Group split: %d train samples (%d groups), %d test samples (%d groups).",
         len(train_idx),
         groups.iloc[train_idx].nunique(),
         len(test_idx),
         groups.iloc[test_idx].nunique(),
     )
     return train_idx, test_idx
-
 
 def compute_cv_reports(
     model_name: str,
@@ -350,14 +339,14 @@ def compute_cv_reports(
     unique_groups = groups.nunique()
     if unique_groups < folds:
         logger.warning(
-            "Número de grupos (%d) menor que n_splits (%d). Se reduce a %d.",
+            "Number of groups (%d) is smaller than n_splits (%d). Reducing to %d.",
             unique_groups,
             folds,
             unique_groups,
         )
         folds = unique_groups
         if folds <= 1:
-            logger.warning("No hay suficientes grupos para CV; se omite la validación cruzada.")
+            logger.warning("Not enough groups for CV; skipping cross-validation.")
             return []
     reports: List[MetricsReport] = []
     gkf = GroupKFold(n_splits=folds)
@@ -385,7 +374,6 @@ def compute_cv_reports(
 
     return reports
 
-
 def feature_importance(pipeline: Pipeline, feature_names: List[str]) -> Optional[List[Tuple[str, float]]]:
     model = pipeline.named_steps.get("model")
     if model is None:
@@ -402,12 +390,11 @@ def feature_importance(pipeline: Pipeline, feature_names: List[str]) -> Optional
         return None
 
     if attrs.shape[0] != len(feature_names):
-        logger.debug("Dimensión de importancias (%d) difiere de #features (%d).", attrs.shape[0], len(feature_names))
+        logger.debug("Importance vector length (%d) differs from #features (%d).", attrs.shape[0], len(feature_names))
         return None
 
     top = sorted(zip(feature_names, attrs), key=lambda x: x[1], reverse=True)
     return top[:20]
-
 
 def save_reports(
     reports: List[MetricsReport],
@@ -431,11 +418,10 @@ def save_reports(
     if summary_df is not None:
         summary_path = output_dir / f"baseline_summary_{timestamp}.csv"
         summary_df.to_csv(summary_path, index=False)
-        logger.info("Resumen guardado en %s", summary_path)
+        logger.info("Summary saved in %s", summary_path)
 
-    logger.info("Resultados guardados en %s", json_path)
+    logger.info("Results saved in %s", json_path)
     return json_path
-
 
 def summarise_reports(reports: List[MetricsReport]) -> pd.DataFrame:
     df = pd.DataFrame([asdict(rep) for rep in reports])
@@ -457,7 +443,6 @@ def summarise_reports(reports: List[MetricsReport]) -> pd.DataFrame:
     summary.fillna(0.0, inplace=True)
     return summary
 
-
 def save_predictions(
     predictions: Dict[str, pd.DataFrame],
     output_dir: Path,
@@ -469,9 +454,8 @@ def save_predictions(
     path = output_dir / f"baseline_predictions_{timestamp}.parquet"
     df_all = pd.concat(predictions.values(), ignore_index=True)
     df_all.to_parquet(path, index=False)
-    logger.info("Predicciones guardadas en %s", path)
+    logger.info("Predictions saved in %s", path)
     return path
-
 
 def main() -> None:
     args = parse_args()
@@ -497,7 +481,7 @@ def main() -> None:
     if cfg.models:
         missing = [m for m in cfg.models if m not in models]
         if missing:
-            raise ValueError(f"Modelos no soportados: {missing}. Disponibles: {list(models)}")
+            raise ValueError(f"Models not recognized: {missing}. Supported models: {list(models.keys())}")
         models = {name: models[name] for name in cfg.models}
 
     reports: List[MetricsReport] = []
@@ -505,7 +489,7 @@ def main() -> None:
     predictions_store: Dict[str, pd.DataFrame] = {}
 
     for name, pipeline in models.items():
-        logger.info("=== Modelo: %s ===", name)
+        logger.info("=== Model: %s ===", name)
         cv_reports = compute_cv_reports(name, pipeline, X_train, y_train, groups_train, cfg.cv_folds)
         reports.extend(cv_reports)
 
@@ -535,7 +519,6 @@ def main() -> None:
     save_reports(reports, feature_rankings, cfg.output_dir, summary_df=summary)
     if cfg.save_predictions:
         save_predictions(predictions_store, cfg.output_dir)
-
 
 if __name__ == "__main__":
     main()
