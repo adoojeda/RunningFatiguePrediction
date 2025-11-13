@@ -49,7 +49,22 @@ META_COLS = {
     "duration",
     "n_samples",
 }
-TARGET_COLS = {"reported_rpe", "fatigue_level"}
+TARGET_COLS_BASE = {"reported_rpe", "fatigue_level"}
+TARGET_LEAKAGE_MAP = {
+    "Fatigue_Score": [
+        "Fatigue_component_norm_fc",
+        "Fatigue_component_norm_acc",
+        "Fatigue_component_norm_jerk",
+        "Fatigue_component_norm_spo2",
+    ],
+    "fatigue_level": [
+        "Fatigue_Score",
+        "Fatigue_component_norm_fc",
+        "Fatigue_component_norm_acc",
+        "Fatigue_component_norm_jerk",
+        "Fatigue_component_norm_spo2",
+    ],
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -81,7 +96,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def compute_feature_summary(df: pd.DataFrame, output_dir: Path) -> Path:
+def compute_feature_summary(df: pd.DataFrame, target_cols: set[str], output_dir: Path) -> Path:
     summary = pd.DataFrame(
         {
             "dtype": df.dtypes.astype(str),
@@ -97,7 +112,7 @@ def compute_feature_summary(df: pd.DataFrame, output_dir: Path) -> Path:
     summary.loc[numeric_cols, "max"] = df[numeric_cols].max()
 
     summary["is_meta"] = summary.index.isin(META_COLS)
-    summary["is_target"] = summary.index.isin(TARGET_COLS)
+    summary["is_target"] = summary.index.isin(target_cols)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "feature_summary.csv"
@@ -106,8 +121,8 @@ def compute_feature_summary(df: pd.DataFrame, output_dir: Path) -> Path:
     return path
 
 
-def correlation_report(df: pd.DataFrame, threshold: float, output_dir: Path) -> Path:
-    numeric = df.select_dtypes(include=[np.number]).drop(columns=list(TARGET_COLS), errors="ignore")
+def correlation_report(df: pd.DataFrame, threshold: float, target_cols: set[str], output_dir: Path) -> Path:
+    numeric = df.select_dtypes(include=[np.number]).drop(columns=list(target_cols), errors="ignore")
     if numeric.empty:
         raise ValueError("No numeric columns available for correlation analysis.")
 
@@ -129,12 +144,15 @@ def correlation_report(df: pd.DataFrame, threshold: float, output_dir: Path) -> 
     return path
 
 
-def feature_importance_report(df: pd.DataFrame, target: str, output_dir: Path) -> Path:
+def feature_importance_report(df: pd.DataFrame, target: str, target_cols: set[str], output_dir: Path) -> Path:
     if target not in df.columns:
         raise KeyError(f"La columna objetivo '{target}' no está presente en el dataset.")
 
     y = pd.to_numeric(df[target], errors="coerce")
-    X = df.drop(columns=list(META_COLS | TARGET_COLS), errors="ignore")
+    X = df.drop(columns=list(META_COLS | target_cols), errors="ignore")
+    leakage_cols = TARGET_LEAKAGE_MAP.get(target, [])
+    if leakage_cols:
+        X = X.drop(columns=[c for c in leakage_cols if c in X.columns], errors="ignore")
     X = X.select_dtypes(include=[np.number])
     mask = np.isfinite(y)
     X = X.loc[mask]
@@ -183,9 +201,11 @@ def main() -> None:
 
     logger.info("Auditoría iniciada sobre %d filas y %d columnas.", len(df), len(df.columns))
 
-    compute_feature_summary(df, output_dir)
-    correlation_report(df, threshold=args.corr_threshold, output_dir=output_dir)
-    feature_importance_report(df, target=args.target, output_dir=output_dir)
+    target_cols = TARGET_COLS_BASE | {args.target}
+
+    compute_feature_summary(df, target_cols=target_cols, output_dir=output_dir)
+    correlation_report(df, threshold=args.corr_threshold, target_cols=target_cols, output_dir=output_dir)
+    feature_importance_report(df, target=args.target, target_cols=target_cols, output_dir=output_dir)
 
     logger.info("Auditoría completada. Revisa los artefactos en %s", output_dir)
 

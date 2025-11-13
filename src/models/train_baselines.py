@@ -56,6 +56,19 @@ META_COLS = {
 }
 
 TARGET_SIBLINGS = {"reported_rpe", "fatigue_level"}
+TARGET_LEAKAGE_MAP = {
+    "Fatigue_Score": [
+        "Fatigue_component_norm_fc",
+        "Fatigue_component_norm_acc",
+        "Fatigue_component_norm_jerk",
+    ],
+    "fatigue_level": [
+        "Fatigue_Score",
+        "Fatigue_component_norm_fc",
+        "Fatigue_component_norm_acc",
+        "Fatigue_component_norm_jerk",
+    ],
+}
 
 FEATURE_WHITELIST = [
     "FC_mean",
@@ -218,6 +231,10 @@ def prepare_features(
 
     exclude = TARGET_SIBLINGS.difference({target})
     df = df.drop(columns=[c for c in exclude if c in df.columns], errors="ignore")
+
+    leakage_cols = TARGET_LEAKAGE_MAP.get(target, [])
+    if leakage_cols:
+        df = df.drop(columns=[c for c in leakage_cols if c in df.columns], errors="ignore")
 
     if feature_whitelist:
         available = [col for col in feature_whitelist if col in df.columns]

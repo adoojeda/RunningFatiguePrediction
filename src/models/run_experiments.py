@@ -4,9 +4,10 @@ Experiment runner for fatigue/RPE modeling.
 Responsibilities:
     * Load the curated feature dataset (3 s windows).
     * Apply the feature whitelist.
-    * Train/evaluate multiple models (GBDT, RF, ElasticNet, XGBoost/LightGBM/CatBoost if available).
-    * Perform hyperparameter search with GroupKFold (via GridSearchCV or Optuna-like loops).
+    * Train/evaluate multiple models (GBDT, RF, HistGB, ElasticNet, optional XGBoost/LightGBM/CatBoost).
+    * Perform hyperparameter search with GroupKFold (via GridSearchCV).
     * Persist metrics, predictions, and serialized models under data/results/modeling/experiments/.
+    * Support multiple grouping strategies (runner_id, session_id, combinations via '+').
 
 Usage:
     python src/models/run_experiments.py \
@@ -23,18 +24,20 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import hashlib
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, HistGradientBoostingRegressor
 from sklearn.linear_model import ElasticNet
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, median_absolute_error, max_error
 from sklearn.model_selection import GroupKFold, GridSearchCV, GroupShuffleSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -45,14 +48,11 @@ try:
 except ImportError:  
     XGBRegressor = None
 
-try:
-    from lightgbm import LGBMRegressor
-except ImportError:  
-    LGBMRegressor = None
+os.environ["LIGHTGBM_NO_DASK"] = "1"
 
 try:
     from catboost import CatBoostRegressor
-except ImportError:  
+except ImportError:  # pragma: no cover
     CatBoostRegressor = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -109,6 +109,31 @@ META_COLS = {
     "n_samples",
 }
 TARGET_SIBLINGS = {"reported_rpe", "fatigue_level"}
+TARGET_LEAKAGE_MAP = {
+    "Fatigue_Score": [
+        "Fatigue_component_norm_fc",
+        "Fatigue_component_norm_acc",
+        "Fatigue_component_norm_jerk",
+    ],
+    "fatigue_level": [
+        "Fatigue_Score",
+        "Fatigue_component_norm_fc",
+        "Fatigue_component_norm_acc",
+        "Fatigue_component_norm_jerk",
+    ],
+}
+
+
+def build_group_series(df: pd.DataFrame, spec: str) -> pd.Series:
+    """Create grouping labels from a spec (single column or '+' separated combination)."""
+    columns = spec.split("+")
+    missing = [col for col in columns if col not in df.columns]
+    if missing:
+        raise KeyError(f"Grouping columns not found in dataset: {missing}")
+    series = df[columns[0]].astype(str)
+    for col in columns[1:]:
+        series = series + "__" + df[col].astype(str)
+    return series
 
 @dataclass
 class ExperimentConfig:
@@ -131,20 +156,30 @@ class FoldResult:
     mae: float
     rmse: float
     r2: float
+    med_ae: float
+    max_err: float
     samples: int
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Experiment runner for fatigue modeling.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="Path to the feature parquet.")
     parser.add_argument("--target", type=str, default="reported_rpe", help="Target column name.")
-    parser.add_argument("--group", type=str, default="runner_id", help="Grouping column for splits.")
+    parser.add_argument("--group", type=str, default="runner_id", help="Primary grouping column for splits.")
+    parser.add_argument(
+        "--grouping",
+        nargs="+",
+        help="Optional list of grouping specs to run (default: runner_id and session_id).",
+    )
     parser.add_argument("--test-size", type=float, default=0.2, help="Test split proportion.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["gradient_boosting", "random_forest", "elasticnet"],
-        help="Model types to train (options: gradient_boosting, random_forest, elasticnet, xgboost, lightgbm, catboost).",
+        default=["gradient_boosting", "random_forest", "hist_gradient_boosting", "elasticnet"],
+        help=(
+            "Model types to train (options: gradient_boosting, random_forest, hist_gradient_boosting, "
+            "elasticnet, xgboost, catboost)."
+        ),
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Results output directory.")
     parser.add_argument("--save-predictions", action="store_true", help="Save test set predictions.")
@@ -159,6 +194,15 @@ def load_dataset(path: Path) -> pd.DataFrame:
     logger.info("Dataset loaded from %s with %d rows and %d columns.", path, df.shape[0], df.shape[1])
     return df
 
+def compute_file_hash(path: Path, chunk_size: int = 1 << 20) -> str:
+    md5 = hashlib.md5()
+    with path.open("rb") as fh:
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            md5.update(chunk)
+    return md5.hexdigest()
 def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tuple[pd.DataFrame, pd.Series]:
     if target not in df.columns:
         raise KeyError(f"Target column '{target}' not present in dataset.")
@@ -167,6 +211,10 @@ def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tupl
     df.drop(columns=[target], inplace=True, errors="ignore")
     df.drop(columns=[c for c in META_COLS if c in df.columns], inplace=True, errors="ignore")
     df.drop(columns=[c for c in TARGET_SIBLINGS if c in df.columns], inplace=True, errors="ignore")
+
+    leakage_cols = TARGET_LEAKAGE_MAP.get(target, [])
+    if leakage_cols:
+        df.drop(columns=[c for c in leakage_cols if c in df.columns], inplace=True, errors="ignore")
 
     if use_whitelist:
         available = [col for col in FEATURE_WHITELIST if col in df.columns]
@@ -206,6 +254,8 @@ def evaluate(y_true: np.ndarray, y_pred: np.ndarray, model_name: str, split: str
         mae=mean_absolute_error(y_true, y_pred),
         rmse=mean_squared_error(y_true, y_pred, squared=False),
         r2=r2_score(y_true, y_pred),
+        med_ae=median_absolute_error(y_true, y_pred),
+        max_err=max_error(y_true, y_pred),
         samples=len(y_true),
     )
 
@@ -237,7 +287,14 @@ def build_model_grid(name: str, seed: int):
         param_grid = {"model__n_estimators": [200, 400], "model__max_depth": [None, 10], "model__min_samples_leaf": [2, 4]}
     elif name == "elasticnet":
         model = ElasticNet(random_state=seed, max_iter=10000)
-        param_grid = {"model__alpha": [0.01, 0.1, 1.0], "model__l1_ratio": [0.1, 0.5, 0.9]}
+        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0], "model__l1_ratio": [0.1, 0.5, 0.9, 0.99]}
+    elif name == "hist_gradient_boosting":
+        model = HistGradientBoostingRegressor(random_state=seed)
+        param_grid = {
+            "model__learning_rate": [0.05, 0.1],
+            "model__max_depth": [None, 8],
+            "model__max_leaf_nodes": [31, 63],
+        }
     elif name == "xgboost":
         if XGBRegressor is None:
             raise ImportError("xgboost is not installed.")
@@ -248,17 +305,13 @@ def build_model_grid(name: str, seed: int):
             n_jobs=-1,
         )
         param_grid = {"model__max_depth": [3, 5], "model__learning_rate": [0.05, 0.1], "model__subsample": [0.8, 1.0]}
-    elif name == "lightgbm":
-        if LGBMRegressor is None:
-            raise ImportError("lightgbm is not installed.")
-        model = LGBMRegressor(random_state=seed)
-        param_grid = {"model__n_estimators": [400, 800], "model__learning_rate": [0.05, 0.1], "model__num_leaves": [31, 63]}
     elif name == "catboost":
         if CatBoostRegressor is None:
             raise ImportError("catboost is not installed.")
         model = CatBoostRegressor(
             random_state=seed,
             verbose=False,
+            allow_writing_files=False,
         )
         param_grid = {"model__depth": [6, 8], "model__learning_rate": [0.03, 0.1], "model__iterations": [300, 600]}
     else:
@@ -268,7 +321,9 @@ def build_model_grid(name: str, seed: int):
 
 def run_experiment(cfg: ExperimentConfig) -> None:
     df = load_dataset(cfg.dataset)
-    groups = df[cfg.group].astype(str)
+    dataset_hash = compute_file_hash(cfg.dataset)
+    logger.info("Running experiment with grouping spec '%s'", cfg.group)
+    groups = build_group_series(df, cfg.group).astype(str)
     X, y = prepare_features(df, cfg.target, cfg.whitelist)
     if len(X) != len(groups):
         groups = groups.loc[X.index]
@@ -279,11 +334,13 @@ def run_experiment(cfg: ExperimentConfig) -> None:
     groups_train = groups.iloc[train_idx]
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_dir = cfg.output_dir / f"experiment_{timestamp}"
+    group_slug = cfg.group.replace("+", "_plus_").replace("/", "_")
+    exp_dir = cfg.output_dir / f"{group_slug}_{timestamp}"
     exp_dir.mkdir(parents=True, exist_ok=True)
     feature_list = X.columns.tolist()
     with open(exp_dir / "feature_columns.json", "w", encoding="utf-8") as f:
         json.dump(feature_list, f, indent=2)
+    (exp_dir / "dataset_hash.txt").write_text(dataset_hash)
 
     all_results: List[FoldResult] = []
     predictions_store: Dict[str, pd.DataFrame] = {}
@@ -325,6 +382,7 @@ def run_experiment(cfg: ExperimentConfig) -> None:
                     "y_true": y_test,
                     "y_pred": test_pred,
                     "model": model_name,
+                    "group_spec": cfg.group,
                 }
             )
             predictions_store[model_name] = pred_df
@@ -348,6 +406,10 @@ def run_experiment(cfg: ExperimentConfig) -> None:
             rmse_std=("rmse", "std"),
             r2_mean=("r2", "mean"),
             r2_std=("r2", "std"),
+             med_ae_mean=("med_ae", "mean"),
+             med_ae_std=("med_ae", "std"),
+             max_err_mean=("max_err", "mean"),
+             max_err_std=("max_err", "std"),
             samples_total=("samples", "sum"),
         )
         .reset_index()
@@ -359,6 +421,7 @@ def run_experiment(cfg: ExperimentConfig) -> None:
     cfg_payload = asdict(cfg)
     cfg_payload["models"] = cfg.models
     cfg_payload["timestamp"] = timestamp
+    cfg_payload["dataset_hash"] = dataset_hash
     for key, value in list(cfg_payload.items()):
         if isinstance(value, Path):
             cfg_payload[key] = str(value)
@@ -373,19 +436,22 @@ def run_experiment(cfg: ExperimentConfig) -> None:
 
 def main() -> None:
     args = parse_args()
-    cfg = ExperimentConfig(
-        dataset=args.dataset,
-        target=args.target,
-        group=args.group,
-        test_size=args.test_size,
-        seed=args.seed,
-        output_dir=args.output_dir,
-        models=args.models,
-        save_predictions=args.save_predictions,
-        save_models=args.save_models,
-        whitelist=not args.no_whitelist,
-    )
-    run_experiment(cfg)
+    default_specs = [args.group, "session_id"]
+    group_specs = args.grouping if args.grouping else default_specs
+    for group_spec in group_specs:
+        cfg = ExperimentConfig(
+            dataset=args.dataset,
+            target=args.target,
+            group=group_spec,
+            test_size=args.test_size,
+            seed=args.seed,
+            output_dir=args.output_dir,
+            models=args.models,
+            save_predictions=args.save_predictions,
+            save_models=args.save_models,
+            whitelist=not args.no_whitelist,
+        )
+        run_experiment(cfg)
 
 if __name__ == "__main__":
     main()

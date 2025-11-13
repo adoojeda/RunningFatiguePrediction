@@ -45,3 +45,11 @@ This whitelist lives in `src/models/train_baselines.py` and is applied before tr
 ### Preprocessing pipeline
 
 During training, every numeric feature is passed through a `SimpleImputer(strategy="median")` followed by a `StandardScaler` (see `build_models` in `src/models/train_baselines.py`). The preprocessing is encapsulated inside each scikit-learn `Pipeline`, guaranteeing that cross-validation and test evaluation use the exact same transformations.
+
+## Modeling workflows
+
+- **Baselines**: `python src/models/train_baselines.py --dataset data/results/features_dataset_3s_50olap.parquet --group runner_id`
+  - trains Gradient Boosting, Random Forest and Linear Regression with grouped CV + hold-out metrics.
+  - uses the curated feature whitelist and saves reports under `data/results/modeling/`.
+- **Experiments**: `python src/models/run_experiments.py --dataset ... --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost --save-predictions --save-models`
+  - runs grouped experiments (runner_id and session_id by default; pass `--grouping` to customize), executes GridSearchCV for each selected model (optionally including XGBoost/CatBoost when installed) and persists metrics, predictions, hashes and serialized models under `data/results/modeling/experiments/`.
