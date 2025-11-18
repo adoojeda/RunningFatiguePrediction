@@ -19,7 +19,6 @@ from typing import Optional
 
 import pandas as pd
 
-# Ensure project root on sys.path when executed as a script
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -43,13 +42,11 @@ BASE_DIR = PROJECT_ROOT
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 ENRICHED_DIR = os.path.join(BASE_DIR, "data", "enriched")
 
-
 # ======================================================================
 # CUSTOM TYPES
 # ======================================================================
 class KinematicsError(Exception):
     """Raised when a kinematic transformation fails."""
-
 
 @dataclass
 class KinematicsStats:
@@ -59,7 +56,6 @@ class KinematicsStats:
     columns_before: int
     columns_after: int
     output_path: str
-
 
 # ======================================================================
 # CORE KINEMATIC FEATURES
@@ -72,13 +68,11 @@ def compute_kinematics(df: pd.DataFrame) -> pd.DataFrame:
     compute_acceleration_magnitudes(df)
     return df
 
-
 def _load_processed_session(path: str) -> pd.DataFrame:
     """Load a processed parquet file and validate its schema."""
     df = pd.read_parquet(path)
     validate_dataframe(df, "processed")
     return df
-
 
 def _write_enriched_session(df: pd.DataFrame, source_path: str, overwrite: bool) -> str:
     """Persist the dataframe to the enriched directory (or overwrite the source)."""
@@ -90,7 +84,6 @@ def _write_enriched_session(df: pd.DataFrame, source_path: str, overwrite: bool)
         output_path = os.path.join(ENRICHED_DIR, base)
     df.to_parquet(output_path, index=False)
     return output_path
-
 
 def process_single_file(path: str, *, overwrite: bool = False) -> Optional[KinematicsStats]:
     """
@@ -117,7 +110,6 @@ def process_single_file(path: str, *, overwrite: bool = False) -> Optional[Kinem
     except Exception as exc:
         logger.error("Failed to process %s: %s", os.path.basename(path), exc, exc_info=True)
         return None
-
 
 # ======================================================================
 # BATCH PROCESSING
@@ -150,7 +142,6 @@ def process_all_kinematics(overwrite: bool = False) -> Optional[int]:
             processed += 1
 
     return processed
-
 
 # ======================================================================
 # MAIN
