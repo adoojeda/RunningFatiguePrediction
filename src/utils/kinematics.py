@@ -34,16 +34,15 @@ from src.config import get_config
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# Configuration knobs (read from environment when available)
+# CONFIGURATION KNOBS
 # ----------------------------------------------------------------------
 CFG = get_config()
 DEFAULT_FS: float = CFG.sampling.default_fs
 DEFAULT_HP_CUTOFF: float = CFG.sampling.highpass_cutoff
 DEFAULT_VTR_SMOOTHING: int = CFG.sampling.vtr_smoothing
 
-
 # ----------------------------------------------------------------------
-# Basic helpers
+# BASIC HELPERS
 # ----------------------------------------------------------------------
 def estimate_sampling_rate(time: Sequence[float]) -> float:
     """Estimate sampling frequency (Hz) from a monotonic time vector."""
@@ -56,8 +55,7 @@ def estimate_sampling_rate(time: Sequence[float]) -> float:
         return np.nan
     return 1.0 / median_dt
 
-
-def centre_accelerations(df: pd.DataFrame, axes: Iterable[str] = ("X", "Y", "Z"), *, prefix: str = "Acc",
+def centre_accelerations(df: pd.DataFrame, axes: Iterable[str] = ("x", "y", "z"), *, prefix: str = "acc_",
                          suffix: str = "_centered") -> pd.DataFrame:
     """
     Subtract the mean from each acceleration axis. Columns are created in place.
@@ -71,15 +69,14 @@ def centre_accelerations(df: pd.DataFrame, axes: Iterable[str] = ("X", "Y", "Z")
         df[centred] = df[col] - df[col].mean()
     return df
 
-
 def compute_acceleration_magnitudes(
     df: pd.DataFrame,
-    axes: Iterable[str] = ("X", "Y", "Z"),
+    axes: Iterable[str] = ("x", "y", "z"),
     *,
-    prefix: str = "Acc",
+    prefix: str = "acc_",
     centred_suffix: str = "_centered",
-    raw_mag_col: str = "Acc_mag",
-    dyn_mag_col: str = "Acc_dyn_mag",
+    raw_mag_col: str = "acc_mag",
+    dyn_mag_col: str = "acc_dyn_mag",
 ) -> pd.DataFrame:
     """Compute raw and centred acceleration magnitudes."""
     required_raw = [f"{prefix}{axis}" for axis in axes]
@@ -89,16 +86,15 @@ def compute_acceleration_magnitudes(
         df[raw_mag_col] = np.sqrt(sum(df[col] ** 2 for col in required_raw))
     else:
         missing = [col for col in required_raw if col not in df.columns]
-        logger.warning("Raw acceleration columns missing (%s); Acc_mag not generated.", missing)
+        logger.warning("Raw acceleration columns missing (%s); acc_mag not generated.", missing)
 
     if all(col in df.columns for col in required_centred):
         df[dyn_mag_col] = np.sqrt(sum(df[col] ** 2 for col in required_centred))
     else:
         missing = [col for col in required_centred if col not in df.columns]
-        logger.warning("Centred acceleration columns missing (%s); Acc_dyn_mag not generated.", missing)
+        logger.warning("Centred acceleration columns missing (%s); acc_dyn_mag not generated.", missing)
 
     return df
-
 
 # ----------------------------------------------------------------------
 # Advanced kinematics
@@ -126,16 +122,15 @@ def highpass_filter(
     except Exception:  
         return filtfilt(b, a, array)
 
-
 def compute_translational_velocity(
     df: pd.DataFrame,
     *,
-    time_col: str = "Relative_Time",
-    accel_prefix: str = "Acc",
+    time_col: str = "relative_time",
+    accel_prefix: str = "acc_",
     centred_suffix: str = "_centered",
-    axes: Iterable[str] = ("X", "Y", "Z"),
-    velocity_prefix: str = "V",
-    velocity_mag_col: str = "Vtr",
+    axes: Iterable[str] = ("x", "y", "z"),
+    velocity_prefix: str = "v",
+    velocity_mag_col: str = "vtr",
     default_fs: float = DEFAULT_FS,
     cutoff: float = DEFAULT_HP_CUTOFF,
 ) -> pd.DataFrame:
@@ -169,15 +164,14 @@ def compute_translational_velocity(
     df[velocity_mag_col] = mag
     return df
 
-
 def compute_jerk(
     df: pd.DataFrame,
     *,
-    time_col: str = "Relative_Time",
-    accel_prefix: str = "Acc",
+    time_col: str = "relative_time",
+    accel_prefix: str = "acc_",
     centred_suffix: str = "_centered",
-    axes: Iterable[str] = ("X", "Y", "Z"),
-    jerk_prefix: str = "jerk",
+    axes: Iterable[str] = ("x", "y", "z"),
+    jerk_prefix: str = "jerk_",
     jerk_mag_col: str = "jerk_mag",
 ) -> pd.DataFrame:
     """Differentiate centred accelerations to obtain jerk components and magnitude."""
@@ -233,7 +227,6 @@ def compute_jerk(
     else:
         df[jerk_mag_col] = np.nan
     return df
-
 
 __all__ = [
     "DEFAULT_FS",

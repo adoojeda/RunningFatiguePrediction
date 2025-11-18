@@ -13,7 +13,6 @@ Usage:
     python src/models/run_experiments.py \
         --dataset data/results/features_dataset_3s_50olap.parquet \
         --group runner_id \
-        --models gradient_boosting random_forest elasticnet xgboost \
         --output-dir data/results/modeling/experiments \
         --save-predictions \
         --save-models
@@ -62,41 +61,67 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "results" / "features_dataset_3s_50olap.parquet"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "results" / "modeling" / "experiments"
 FEATURE_WHITELIST = [
-    "FC_mean",
-    "SpO2_mean",
-    "Fatigue_Score",
-    "Fatigue_component_norm_fc",
-    "Fatigue_component_norm_acc",
-    "Fatigue_component_norm_jerk",
-    "Acc_mean",
-    "Acc_std",
-    "Acc_mag_mad",
-    "Acc_mag_skew",
-    "Acc_mag_kurt",
-    "AccX_centered_mean",
-    "AccX_centered_std",
-    "AccX_centered_mad",
-    "AccX_centered_skew",
-    "AccX_centered_kurt",
-    "AccY_centered_mean",
-    "AccY_centered_std",
-    "AccY_centered_mad",
-    "AccY_centered_skew",
-    "AccY_centered_kurt",
-    "AccZ_centered_mean",
-    "AccZ_centered_std",
-    "AccZ_centered_mad",
-    "AccZ_centered_skew",
-    "AccZ_centered_kurt",
-    "Vtr_mean",
-    "Vtr_std",
-    "Vtr_mad",
-    "Vtr_skew",
-    "Vtr_kurt",
+    # Heart/oxygen
+    "fc_mean",
+    "spo2_mean",
+    # Accelerations
+    "acc_mean",
+    "acc_std",
+    "acc_mag_mad",
+    "acc_mag_skew",
+    "acc_mag_kurt",
+    "acc_x_centered_mean",
+    "acc_x_centered_std",
+    "acc_x_centered_mad",
+    "acc_x_centered_skew",
+    "acc_x_centered_kurt",
+    "acc_y_centered_mean",
+    "acc_y_centered_std",
+    "acc_y_centered_mad",
+    "acc_y_centered_skew",
+    "acc_y_centered_kurt",
+    "acc_z_centered_mean",
+    "acc_z_centered_std",
+    "acc_z_centered_mad",
+    "acc_z_centered_skew",
+    "acc_z_centered_kurt",
+    # Velocity
+    "vtr_mean",
+    "vtr_std",
+    "vtr_mad",
+    "vtr_skew",
+    "vtr_kurt",
+    # Jerk
     "jerk_mean",
     "jerk_std",
     "jerk_mad",
     "jerk_skew",
+    # Orientation / balance
+    "roll_mean",
+    "roll_std",
+    "roll_mad",
+    "roll_skew",
+    "roll_kurt",
+    "yaw_mean",
+    "yaw_std",
+    "yaw_mad",
+    "yaw_skew",
+    "yaw_kurt",
+    "grav_x_mean",
+    "grav_x_std",
+    "grav_x_mad",
+    "grav_x_skew",
+    "grav_x_kurt",
+    "grav_y_mean",
+    "grav_y_std",
+    "grav_y_mad",
+    "grav_y_skew",
+    "grav_y_kurt",
+    "grav_z_mean",
+    "grav_z_std",
+    "grav_z_mad",
+    "grav_z_skew",
+    "grav_z_kurt",
 ]
 
 META_COLS = {
@@ -104,23 +129,15 @@ META_COLS = {
     "source_file",
     "runner_id",
     "session_id",
+    "age",
     "start_s",
     "duration",
     "n_samples",
 }
 TARGET_SIBLINGS = {"reported_rpe", "fatigue_level"}
 TARGET_LEAKAGE_MAP = {
-    "Fatigue_Score": [
-        "Fatigue_component_norm_fc",
-        "Fatigue_component_norm_acc",
-        "Fatigue_component_norm_jerk",
-    ],
-    "fatigue_level": [
-        "Fatigue_Score",
-        "Fatigue_component_norm_fc",
-        "Fatigue_component_norm_acc",
-        "Fatigue_component_norm_jerk",
-    ],
+    "fatigue_score": [],
+    "fatigue_level": ["fatigue_score"],
 }
 
 
@@ -147,6 +164,8 @@ class ExperimentConfig:
     save_predictions: bool
     save_models: bool
     whitelist: bool
+    n_jobs: int
+    fast_grid: bool
 
 @dataclass
 class FoldResult:
@@ -164,18 +183,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Experiment runner for fatigue modeling.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="Path to the feature parquet.")
     parser.add_argument("--target", type=str, default="reported_rpe", help="Target column name.")
-    parser.add_argument("--group", type=str, default="runner_id", help="Primary grouping column for splits.")
-    parser.add_argument(
-        "--grouping",
-        nargs="+",
-        help="Optional list of grouping specs to run (default: runner_id and session_id).",
-    )
+    parser.add_argument("--group", type=str, default="runner_id", help="Grouping column for splits.")
     parser.add_argument("--test-size", type=float, default=0.2, help="Test split proportion.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["gradient_boosting", "random_forest", "hist_gradient_boosting", "elasticnet"],
+        default=["gradient_boosting", "random_forest", "hist_gradient_boosting", "elasticnet", "xgboost", "catboost"],
         help=(
             "Model types to train (options: gradient_boosting, random_forest, hist_gradient_boosting, "
             "elasticnet, xgboost, catboost)."
@@ -185,6 +199,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-predictions", action="store_true", help="Save test set predictions.")
     parser.add_argument("--save-models", action="store_true", help="Save trained models.")
     parser.add_argument("--no-whitelist", action="store_true", help="Do not use feature whitelist; use all numeric features.")
+    parser.add_argument("--n-jobs", type=int, default=-1, help="Parallelism for GridSearchCV/model training.")
+    parser.add_argument("--fast-grid", action="store_true", help="Use a reduced hyperparameter grid for faster runs.")
     return parser.parse_args()
 
 def load_dataset(path: Path) -> pd.DataFrame:
@@ -203,6 +219,7 @@ def compute_file_hash(path: Path, chunk_size: int = 1 << 20) -> str:
                 break
             md5.update(chunk)
     return md5.hexdigest()
+
 def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tuple[pd.DataFrame, pd.Series]:
     if target not in df.columns:
         raise KeyError(f"Target column '{target}' not present in dataset.")
@@ -273,28 +290,50 @@ def make_numeric_pipeline(model) -> Pipeline:
         ]
     )
 
-def build_model_grid(name: str, seed: int):
+def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
+    n_jobs = 1 if n_jobs == 0 else n_jobs
     if name == "gradient_boosting":
         model = GradientBoostingRegressor(random_state=seed)
-        param_grid = {
-            "model__n_estimators": [200, 400],
-            "model__max_depth": [3, 4],
-            "model__learning_rate": [0.05, 0.1],
-            "model__subsample": [0.8, 1.0],
-        }
+        param_grid = (
+            {
+                "model__n_estimators": [200],
+                "model__max_depth": [3],
+                "model__learning_rate": [0.1],
+                "model__subsample": [1.0],
+            }
+            if fast_grid
+            else {
+                "model__n_estimators": [200, 400],
+                "model__max_depth": [3, 4],
+                "model__learning_rate": [0.05, 0.1],
+                "model__subsample": [0.8, 1.0],
+            }
+        )
     elif name == "random_forest":
-        model = RandomForestRegressor(random_state=seed, n_jobs=-1)
-        param_grid = {"model__n_estimators": [200, 400], "model__max_depth": [None, 10], "model__min_samples_leaf": [2, 4]}
+        model = RandomForestRegressor(random_state=seed, n_jobs=n_jobs)
+        param_grid = (
+            {"model__n_estimators": [200], "model__max_depth": [None], "model__min_samples_leaf": [2]}
+            if fast_grid
+            else {"model__n_estimators": [200, 400], "model__max_depth": [None, 10], "model__min_samples_leaf": [2, 4]}
+        )
     elif name == "elasticnet":
         model = ElasticNet(random_state=seed, max_iter=10000)
-        param_grid = {"model__alpha": [0.01, 0.1, 1.0, 10.0], "model__l1_ratio": [0.1, 0.5, 0.9, 0.99]}
+        param_grid = (
+            {"model__alpha": [0.1], "model__l1_ratio": [0.5]}
+            if fast_grid
+            else {"model__alpha": [0.01, 0.1, 1.0, 10.0], "model__l1_ratio": [0.1, 0.5, 0.9, 0.99]}
+        )
     elif name == "hist_gradient_boosting":
         model = HistGradientBoostingRegressor(random_state=seed)
-        param_grid = {
-            "model__learning_rate": [0.05, 0.1],
-            "model__max_depth": [None, 8],
-            "model__max_leaf_nodes": [31, 63],
-        }
+        param_grid = (
+            {"model__learning_rate": [0.05], "model__max_depth": [None], "model__max_leaf_nodes": [31]}
+            if fast_grid
+            else {
+                "model__learning_rate": [0.05, 0.1],
+                "model__max_depth": [None, 8],
+                "model__max_leaf_nodes": [31, 63],
+            }
+        )
     elif name == "xgboost":
         if XGBRegressor is None:
             raise ImportError("xgboost is not installed.")
@@ -302,9 +341,13 @@ def build_model_grid(name: str, seed: int):
             random_state=seed,
             n_estimators=400,
             tree_method="hist",
-            n_jobs=-1,
+            n_jobs=n_jobs,
         )
-        param_grid = {"model__max_depth": [3, 5], "model__learning_rate": [0.05, 0.1], "model__subsample": [0.8, 1.0]}
+        param_grid = (
+            {"model__max_depth": [3], "model__learning_rate": [0.1], "model__subsample": [1.0]}
+            if fast_grid
+            else {"model__max_depth": [3, 5], "model__learning_rate": [0.05, 0.1], "model__subsample": [0.8, 1.0]}
+        )
     elif name == "catboost":
         if CatBoostRegressor is None:
             raise ImportError("catboost is not installed.")
@@ -313,7 +356,11 @@ def build_model_grid(name: str, seed: int):
             verbose=False,
             allow_writing_files=False,
         )
-        param_grid = {"model__depth": [6, 8], "model__learning_rate": [0.03, 0.1], "model__iterations": [300, 600]}
+        param_grid = (
+            {"model__depth": [6], "model__learning_rate": [0.03], "model__iterations": [300]}
+            if fast_grid
+            else {"model__depth": [6, 8], "model__learning_rate": [0.03, 0.1], "model__iterations": [300, 600]}
+        )
     else:
         raise ValueError(f"Model '{name}' no soportado.")
     pipeline = make_numeric_pipeline(model)
@@ -347,14 +394,14 @@ def run_experiment(cfg: ExperimentConfig) -> None:
 
     for model_name in cfg.models:
         logger.info("=== Model %s ===", model_name)
-        pipeline, param_grid = build_model_grid(model_name, cfg.seed)
+        pipeline, param_grid = build_model_grid(model_name, cfg.seed, cfg.n_jobs, cfg.fast_grid)
         gkf = GroupKFold(n_splits=min(5, groups_train.nunique()))
         search = GridSearchCV(
             estimator=pipeline,
             param_grid=param_grid,
             cv=gkf,
             scoring="neg_mean_absolute_error",
-            n_jobs=-1,
+            n_jobs=cfg.n_jobs,
             verbose=1,
         )
         search.fit(X_train, y_train, groups=groups_train)
@@ -436,22 +483,21 @@ def run_experiment(cfg: ExperimentConfig) -> None:
 
 def main() -> None:
     args = parse_args()
-    default_specs = [args.group, "session_id"]
-    group_specs = args.grouping if args.grouping else default_specs
-    for group_spec in group_specs:
-        cfg = ExperimentConfig(
-            dataset=args.dataset,
-            target=args.target,
-            group=group_spec,
-            test_size=args.test_size,
-            seed=args.seed,
-            output_dir=args.output_dir,
-            models=args.models,
-            save_predictions=args.save_predictions,
-            save_models=args.save_models,
-            whitelist=not args.no_whitelist,
-        )
-        run_experiment(cfg)
+    cfg = ExperimentConfig(
+        dataset=args.dataset,
+        target=args.target,
+        group=args.group,
+        test_size=args.test_size,
+        seed=args.seed,
+        output_dir=args.output_dir,
+        models=args.models,
+        save_predictions=args.save_predictions,
+        save_models=args.save_models,
+        whitelist=not args.no_whitelist,
+        n_jobs=args.n_jobs,
+        fast_grid=args.fast_grid,
+    )
+    run_experiment(cfg)
 
 if __name__ == "__main__":
     main()

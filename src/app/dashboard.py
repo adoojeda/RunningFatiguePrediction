@@ -40,6 +40,27 @@ DATA_DIR = BASE_DIR / "data"
 ENRICHED_DIR = DATA_DIR / "enriched"
 EXCLUDED_PREFIXES = ("all_sessions_metrics", "features_dataset")
 
+# Mapping from legacy/camel columns to snake_case
+COL_RENAME = {
+    "Relative_Time": "relative_time",
+    "Tiempo_rel": "relative_time",
+    "AccX": "acc_x",
+    "AccY": "acc_y",
+    "AccZ": "acc_z",
+    "GravX": "grav_x",
+    "GravY": "grav_y",
+    "GravZ": "grav_z",
+    "RotX": "rot_x",
+    "RotY": "rot_y",
+    "RotZ": "rot_z",
+    "Roll": "roll",
+    "Pitch": "pitch",
+    "Yaw": "yaw",
+    "FC": "fc",
+    "SpO2": "spo2",
+    "Vtr": "vtr",
+}
+
 # ======================================================================
 # DATA HELPERS
 # ======================================================================
@@ -67,6 +88,7 @@ def load_dataset(path_str: str) -> pd.DataFrame:
         df = load_data(path_str)
         if df is None:
             return pd.DataFrame()
+        df = df.rename(columns=COL_RENAME)
         return df
     except Exception as exc:
         logger.error("Failed to load dataset %s: %s", path_str, exc, exc_info=True)
@@ -76,28 +98,30 @@ def relative_time_bounds(df: pd.DataFrame) -> Tuple[float, float]:
     """
     Return min/max bounds for the `Relative_Time` column. Falls back to zero-length interval.
     """
-    if "Relative_Time" not in df.columns:
-        if "Tiempo_rel" in df.columns:
-            df = df.rename(columns={"Tiempo_rel": "Relative_Time"})
-        else:
-            return 0.0, 0.0
-    return float(df["Relative_Time"].min()), float(df["Relative_Time"].max())
+    if "relative_time" not in df.columns:
+        return 0.0, 0.0
+    return float(df["relative_time"].min()), float(df["relative_time"].max())
 
 # ======================================================================
 def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
-    duration = df["Relative_Time"].max() - df["Relative_Time"].min() if "Relative_Time" in df.columns else 0
+    duration = df["relative_time"].max() - df["relative_time"].min() if "relative_time" in df.columns else 0
     info = {
         "file": os.path.basename(source_path),
         "rows": f"{len(df):,}",
         "duration": f"{duration:.1f} s" if duration else "N/A",
     }
-    for col in ("runner_id", "session_id", "reported_rpe"):
+    for col in ("runner_id", "session_id", "reported_rpe", "age", "sex"):
         if col in df.columns:
             unique_vals = df[col].dropna().unique()
             if unique_vals.size == 1:
                 info[col] = str(unique_vals[0])
             elif unique_vals.size > 1:
                 info[col] = f"Mixed ({unique_vals.size})"
+    # Optional targets
+    for col in ("fatigue_score", "fatigue_level"):
+        if col in df.columns and df[col].notna().any():
+            val = df[col].dropna().iloc[0]
+            info[col] = f"{val:.3f}" if pd.api.types.is_numeric_dtype(df[col]) else str(val)
     return info
 
 # ======================================================================
@@ -212,6 +236,27 @@ app.layout = dbc.Container(
 )
 
 # ======================================================================
+# Helper: fatigue plot
+# ======================================================================
+def render_fatigue_plot(window: pd.DataFrame):
+    if "fatigue_score" not in window.columns:
+        return dbc.Alert("Fatigue score not available in this file.", color="warning")
+    fig = px.line(
+        window,
+        x="relative_time",
+        y="fatigue_score",
+        title="Fatigue score over time",
+        labels={"relative_time": "Time (s)", "fatigue_score": "Score"},
+    )
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(family="Arial", size=12, color="#2a3f5f"),
+        title_font=dict(size=16, color="#1f2c56"),
+        margin=dict(l=40, r=40, t=60, b=40),
+    )
+    return dcc.Graph(figure=fig)
+
+# ======================================================================
 # CALLBACKS
 # ======================================================================
 @app.callback(
@@ -276,15 +321,11 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
     df = load_dataset(selected_path)
     if df.empty:
         return dbc.Alert("Unable to load the selected file or it contains no data.", color="danger")
-
-    if "Relative_Time" not in df.columns:
-        if "Tiempo_rel" in df.columns:
-            df = df.rename(columns={"Tiempo_rel": "Relative_Time"})
-        else:
-            return dbc.Alert("The dataset does not include a valid time column.", color="danger")
+    if "relative_time" not in df.columns:
+        return dbc.Alert("The dataset does not include a valid time column.", color="danger")
 
     start, end = selected_time
-    window = df[(df["Relative_Time"] >= start) & (df["Relative_Time"] <= end)].copy()
+    window = df[(df["relative_time"] >= start) & (df["relative_time"] <= end)].copy()
     if window.empty:
         return dbc.Alert("No samples available for the selected time interval.", color="warning")
 
@@ -302,10 +343,10 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
         return fig
 
     axis_tabs = {
-        "acc_tab": (["AccX", "AccY", "AccZ"], "Acceleration (m/s²)", "Acceleration (m/s²)"),
-        "grav_tab": (["GravX", "GravY", "GravZ"], "Gravity components (g)", "Gravity (g)"),
-        "rot_tab": (["RotX", "RotY", "RotZ"], "Angular velocity (rad/s)", "Angular velocity (rad/s)"),
-        "orient_tab": (["Roll", "Pitch", "Yaw"], "Orientation (rad)", "Angle (rad)"),
+        "acc_tab": (["acc_x", "acc_y", "acc_z"], "Acceleration (m/s²)", "Acceleration (m/s²)"),
+        "grav_tab": (["grav_x", "grav_y", "grav_z"], "Gravity components (g)", "Gravity (g)"),
+        "rot_tab": (["rot_x", "rot_y", "rot_z"], "Angular velocity (rad/s)", "Angular velocity (rad/s)"),
+        "orient_tab": (["roll", "pitch", "yaw"], "Orientation (rad)", "Angle (rad)"),
     }
 
     if selected_tab in axis_tabs:
@@ -322,31 +363,31 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
             return dbc.Alert(f"Expected columns not found: {cols}", color="warning")
         fig = px.line(
             window,
-            x="Relative_Time",
+            x="relative_time",
             y=display_cols,
             title=title,
-            labels={"value": y_label, "variable": "Axis", "Relative_Time": "Time (s)"},
+            labels={"value": y_label, "variable": "Axis", "relative_time": "Time (s)"},
         )
         return dcc.Graph(figure=style_fig(fig))
 
     if selected_tab == "fc_tab":
         graphs = []
-        if "FC" in window.columns:
+        if "fc" in window.columns:
             fig_fc = px.line(
                 window,
-                x="Relative_Time",
-                y="FC",
+                x="relative_time",
+                y="fc",
                 title="Heart rate (bpm)",
-                labels={"FC": "Beats per minute", "Relative_Time": "Time (s)"},
+                labels={"fc": "Beats per minute", "relative_time": "Time (s)"},
             )
             graphs.append(dcc.Graph(figure=style_fig(fig_fc)))
-        if "SpO2" in window.columns:
+        if "spo2" in window.columns:
             fig_spo2 = px.line(
                 window,
-                x="Relative_Time",
-                y="SpO2",
+                x="relative_time",
+                y="spo2",
                 title="Pulse oximetry (SpO₂ %)",
-                labels={"SpO2": "Percentage (%)", "Relative_Time": "Time (s)"},
+                labels={"spo2": "Percentage (%)", "relative_time": "Time (s)"},
             )
             graphs.append(dcc.Graph(figure=style_fig(fig_spo2)))
         return html.Div(graphs) if graphs else dbc.Alert(
@@ -354,20 +395,20 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
         )
 
     if selected_tab == "vtr_tab":
-        if "Vtr" not in window.columns:
+        if "vtr" not in window.columns:
             return dbc.Alert("Translational velocity is not available in this file.", color="warning")
         if smooth_vtr:
-            smoothed = window["Vtr"].rolling(window=DEFAULT_VTR_SMOOTHING, center=True, min_periods=1).mean()
+            smoothed = window["vtr"].rolling(window=DEFAULT_VTR_SMOOTHING, center=True, min_periods=1).mean()
             fig = px.line(
                 window,
-                x="Relative_Time",
+                x="relative_time",
                 y=smoothed,
                 title="Translational velocity (smoothed)",
-                labels={"Relative_Time": "Time (s)", "value": "Velocity (m/s)"},
+                labels={"relative_time": "Time (s)", "value": "Velocity (m/s)"},
             )
             fig.add_scatter(
-                x=window["Relative_Time"],
-                y=window["Vtr"],
+                x=window["relative_time"],
+                y=window["vtr"],
                 mode="lines",
                 name="Raw Vtr",
                 line=dict(color="rgba(150,150,150,0.3)", width=1, dash="dot"),
@@ -375,10 +416,10 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
         else:
             fig = px.line(
                 window,
-                x="Relative_Time",
-                y="Vtr",
+                x="relative_time",
+                y="vtr",
                 title="Translational velocity (raw)",
-                labels={"Relative_Time": "Time (s)", "Vtr": "Velocity (m/s)"},
+                labels={"relative_time": "Time (s)", "vtr": "Velocity (m/s)"},
             )
         return dcc.Graph(figure=style_fig(fig))
 

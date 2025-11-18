@@ -13,49 +13,45 @@ from typing import Dict, Iterable, List
 import pandas as pd
 from pandas.api import types as ptypes
 
-
 @dataclass(frozen=True)
 class DataSchema:
     """Minimal schema definition used for dataframe validation."""
-
     name: str
     required: Iterable[str]
     numeric: Iterable[str]
     description: str
 
-
 RAW_COLUMNS: List[str] = [
-    "Time",
-    "AccX",
-    "AccY",
-    "AccZ",
-    "GravX",
-    "GravY",
-    "GravZ",
-    "RotX",
-    "RotY",
-    "RotZ",
-    "Roll",
-    "Pitch",
-    "Yaw",
-    "FC",
-    "SpO2",
+    "time",
+    "acc_x",
+    "acc_y",
+    "acc_z",
+    "grav_x",
+    "grav_y",
+    "grav_z",
+    "rot_x",
+    "rot_y",
+    "rot_z",
+    "roll",
+    "pitch",
+    "yaw",
+    "fc",
+    "spo2",
 ]
 
 PROCESSED_COLUMNS: List[str] = [
-    "Relative_Time",
+    "relative_time",
     *RAW_COLUMNS[1:],  
 ]
 
 ENRICHED_COLUMNS: List[str] = [
     *PROCESSED_COLUMNS,
-    "AccX_centered",
-    "AccY_centered",
-    "AccZ_centered",
-    "Acc_mag",
-    "Acc_dyn_mag",
+    "acc_x_centered",
+    "acc_y_centered",
+    "acc_z_centered",
+    "acc_mag",
+    "acc_dyn_mag",
 ]
-
 
 SCHEMAS: Dict[str, DataSchema] = {
     "raw": DataSchema(
@@ -77,7 +73,6 @@ SCHEMAS: Dict[str, DataSchema] = {
         description="Parquet enriched with centred accelerations and magnitudes.",
     ),
 }
-
 
 def validate_dataframe(
     df: pd.DataFrame,
@@ -116,6 +111,5 @@ def validate_dataframe(
         return False
 
     return True
-
 
 __all__ = ["validate_dataframe", "SCHEMAS"]

@@ -21,7 +21,6 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
-# Ensure project root on sys.path when executed directly
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -61,22 +60,18 @@ CFG = get_config()
 WEIGHTS = dict(CFG.fatigue_weights.weights)
 DEFAULT_FATIGUE_REFERENCES: Dict[str, float] = dict(CFG.fatigue_refs.references)
 
-
 # ======================================================================
 # CUSTOM TYPES
 # ======================================================================
 class MetricsError(Exception):
     """Base exception for the metrics pipeline."""
 
-
 @dataclass
 class SessionResult:
     """Summary of the processing outcome for a single session."""
-
     file: str
     fatigue_score: float
     metrics: Dict[str, float]
-
 
 # ======================================================================
 # SESSION METRICS
@@ -92,23 +87,22 @@ def compute_session_metrics(df: pd.DataFrame) -> Dict[str, float]:
         return series.mean(), series.std()
 
     try:
-        if "Acc_mag" in df.columns:
-            metrics["Acc_mean"], metrics["Acc_std"] = safe_stat("Acc_mag")
-        if "Acc_dyn_mag" in df.columns:
-            metrics["Acc_dyn_mean"], metrics["Acc_dyn_std"] = safe_stat("Acc_dyn_mag")
-        if "Vtr" in df.columns:
-            metrics["Vtr_mean"], metrics["Vtr_std"] = safe_stat("Vtr")
-        if "FC" in df.columns:
-            metrics["FC_mean"], metrics["FC_std"] = safe_stat("FC")
-        if "SpO2" in df.columns:
-            metrics["SpO2_mean"], metrics["SpO2_std"] = safe_stat("SpO2")
+        if "acc_mag" in df.columns:
+            metrics["acc_mean"], metrics["acc_std"] = safe_stat("acc_mag")
+        if "acc_dyn_mag" in df.columns:
+            metrics["acc_dyn_mean"], metrics["acc_dyn_std"] = safe_stat("acc_dyn_mag")
+        if "vtr" in df.columns:
+            metrics["vtr_mean"], metrics["vtr_std"] = safe_stat("vtr")
+        if "fc" in df.columns:
+            metrics["fc_mean"], metrics["fc_std"] = safe_stat("fc")
+        if "spo2" in df.columns:
+            metrics["spo2_mean"], metrics["spo2_std"] = safe_stat("spo2")
         if "jerk_mag" in df.columns:
             metrics["jerk_mean"], metrics["jerk_std"] = safe_stat("jerk_mag")
     except Exception as exc:
         logger.error("Error computing session metrics: %s", exc, exc_info=True)
 
     return metrics
-
 
 # ======================================================================
 # FATIGUE REFERENCES
@@ -120,14 +114,12 @@ def _safe_percentile(series: pd.Series, q: float) -> float:
         return np.nan
     return float(np.nanpercentile(values.to_numpy(dtype=float), q))
 
-
 def _safe_std(series: pd.Series) -> float:
     """Standard deviation helper resilient to NaNs and empty inputs."""
     values = pd.to_numeric(series, errors="coerce")
     if values.notna().sum() < 2:
         return np.nan
     return float(np.nanstd(values.to_numpy(dtype=float), ddof=1))
-
 
 def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
     """
@@ -136,18 +128,18 @@ def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
     refs = DEFAULT_FATIGUE_REFERENCES.copy()
 
     try:
-        if "FC" in df.columns:
-            fc_95 = _safe_percentile(df["FC"], 95)
+        if "fc" in df.columns:
+            fc_95 = _safe_percentile(df["fc"], 95)
             if np.isfinite(fc_95):
                 refs["fc_max"] = max(fc_95, 1e-6)
 
-        if "SpO2" in df.columns:
-            spo2_05 = _safe_percentile(df["SpO2"], 5)
+        if "spo2" in df.columns:
+            spo2_05 = _safe_percentile(df["spo2"], 5)
             if np.isfinite(spo2_05):
                 refs["spo2_min"] = min(spo2_05, refs["spo2_min"])
 
-        if "Acc_mag" in df.columns:
-            acc_std = _safe_std(df["Acc_mag"])
+        if "acc_mag" in df.columns:
+            acc_std = _safe_std(df["acc_mag"])
             if np.isfinite(acc_std):
                 refs["acc_std_ref"] = max(acc_std, 1e-6)
 
@@ -160,7 +152,6 @@ def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
         logger.warning("Failed to derive fatigue references: %s", exc, exc_info=True)
 
     return refs
-
 
 # ======================================================================
 # FATIGUE SCORE
@@ -175,7 +166,7 @@ def compute_fatigue_score(
 ) -> Dict[str, float]:
     """Compute the composite fatigue score with configurable weights and references."""
     if not metrics:
-        return {"Fatigue_Score": np.nan}
+        return {"fatigue_score": np.nan}
 
     if context not in {"session", "window"}:
         raise ValueError(f"Invalid context '{context}'. Expected 'session' or 'window'.")
@@ -189,16 +180,16 @@ def compute_fatigue_score(
         weight_cfg.update({k: v for k, v in weights.items() if k in weight_cfg})
 
     fc_denominator = max(params["fc_max"], 1e-6)
-    norm_fc = np.clip(metrics.get("FC_mean", 0.0) / fc_denominator, 0.0, 1.0)
+    norm_fc = np.clip(metrics.get("fc_mean", 0.0) / fc_denominator, 0.0, 1.0)
 
     spo2_denominator = max(100.0 - params["spo2_min"], 1e-6)
     norm_spo2 = np.clip(
-        1.0 - ((metrics.get("SpO2_mean", 100.0) - params["spo2_min"]) / spo2_denominator),
+        1.0 - ((metrics.get("spo2_mean", 100.0) - params["spo2_min"]) / spo2_denominator),
         0.0,
         1.0,
     )
 
-    acc_std = metrics.get("Acc_std", np.nan)
+    acc_std = metrics.get("acc_std", np.nan)
     jerk_std = metrics.get("jerk_std", np.nan)
 
     if context == "window":
@@ -227,21 +218,20 @@ def compute_fatigue_score(
         + weight_cfg["spo2"] * norm_spo2
     )
 
-    metrics["Fatigue_Score"] = round(float(fatigue), 3)
-    metrics["Fatigue_components"] = {
+    metrics["fatigue_score"] = round(float(fatigue), 3)
+    metrics["fatigue_components"] = {
         "norm_fc": round(norm_fc, 3),
         "norm_spo2": round(norm_spo2, 3),
         "norm_acc": round(norm_acc, 3),
         "norm_jerk": round(norm_jerk, 3),
     }
-    metrics["Fatigue_references"] = {
+    metrics["fatigue_references"] = {
         "fc_max": round(params["fc_max"], 3),
         "spo2_min": round(params["spo2_min"], 3),
         "acc_std_ref": round(params["acc_std_ref"], 3),
         "jerk_std_ref": round(params["jerk_std_ref"], 3),
     }
     return metrics
-
 
 # ======================================================================
 # DATA HANDLING HELPERS
@@ -253,13 +243,12 @@ def _load_session(path: str) -> pd.DataFrame:
     validate_dataframe(df, schema_name)
     return df
 
-
 def _apply_biomechanics(df: pd.DataFrame) -> pd.DataFrame:
     """Run the biomechanical enrichments required before scoring."""
-    if "Relative_Time" in df.columns:
+    if "relative_time" in df.columns:
         df = (
-            df.sort_values("Relative_Time")
-            .drop_duplicates(subset="Relative_Time", keep="first")
+            df.sort_values("relative_time")
+            .drop_duplicates(subset="relative_time", keep="first")
             .reset_index(drop=True)
         )
     df = centre_accelerations(df)
@@ -272,21 +261,13 @@ def _apply_biomechanics(df: pd.DataFrame) -> pd.DataFrame:
     df = compute_jerk(df)
     return df
 
-
 def _annotate_fatigue(df: pd.DataFrame, session_metrics: Dict[str, float]) -> None:
     """Attach fatigue score and components to the dataframe in place."""
-    fatigue_score = session_metrics.get("Fatigue_Score")
+    fatigue_score = session_metrics.get("fatigue_score")
     if fatigue_score is None or not np.isfinite(fatigue_score):
         return
 
-    df["Fatigue_Score"] = fatigue_score
-    df["Fatigue_Score_session"] = fatigue_score
-    components = session_metrics.get("Fatigue_components", {})
-    for key, value in components.items():
-        if value is None or not np.isfinite(value):
-            continue
-        df[f"Fatigue_component_{key}"] = value
-
+    df["fatigue_score"] = fatigue_score
 
 def _save_enriched(df: pd.DataFrame, path: str) -> bool:
     """Persist enriched dataframe back to disk."""
@@ -298,7 +279,6 @@ def _save_enriched(df: pd.DataFrame, path: str) -> bool:
     except Exception as exc:
         logger.error("Error saving enriched file %s: %s", os.path.basename(path), exc, exc_info=True)
         return False
-
 
 # ======================================================================
 # GLOBAL PROCESSING
@@ -331,7 +311,6 @@ def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
     except Exception as exc:
         logger.error("Error processing %s: %s", os.path.basename(path), exc, exc_info=True)
         return None
-
 
 def process_all_sessions(
     save_enriched: bool = True,
@@ -366,20 +345,19 @@ def process_all_sessions(
     logger.info("Global metrics saved to: %s (%d sessions)", OUTPUT_PARQUET, len(df_all))
     return df_all
 
-
 # ======================================================================
 # MAIN
 # ======================================================================
 if __name__ == "__main__":
-    print("🚀 Starting advanced metrics computation...")
+    print("Starting advanced metrics computation...")
     print("=" * 50)
 
     df_metrics = process_all_sessions(save_enriched=True)
 
     if df_metrics is not None:
-        print("\n✅ Combined metrics generated:")
+        print("\nCombined metrics generated:")
         print(df_metrics.head())
-        print(f"\n📁 Processed files: {len(df_metrics)}")
-        print(f"💾 Global metrics stored in: {RESULTS_DIR}")
+        print(f"\nProcessed files: {len(df_metrics)}")
+        print(f"Global metrics stored in: {RESULTS_DIR}")
     else:
-        print("⚠️ No metrics were generated.")
+        print("No metrics were generated.")

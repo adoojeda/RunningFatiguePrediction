@@ -3,7 +3,7 @@ Utility module to simplify data loading across the running fatigue pipeline.
 
 Main capabilities:
 - Load processed or enriched parquet/CSV files and ensure temporal consistency.
-- Derive a `Second` column from `Relative_Time` for coarse aggregations.
+- Derive a `Second` column from `relative_time` for coarse aggregations.
 - Average numeric signals per second (`average_per_second`).
 - Load the unified feature dataset stored under data/results/.
 - Concatenate multiple sessions for exploratory analysis or validation workflows.
@@ -43,7 +43,6 @@ ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
 DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
 
-
 def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = None) -> List[str]:
     """Return possible file paths inside *directory* derived from *name* and optional prefixes."""
     if os.path.isabs(name):
@@ -55,7 +54,6 @@ def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = 
         prefixed = filename if filename.startswith(prefix) else f"{prefix}{filename}"
         candidates.append(os.path.join(directory, prefixed))
 
-    # Preserve order while removing duplicates
     seen = set()
     unique_candidates = []
     for path in candidates:
@@ -76,10 +74,10 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
     -------
     Optional[pandas.DataFrame]
         DataFrame containing at least:
-            * `Relative_Time` (float seconds) or `Time`
-            * inertial sensors (`Acc*`, `Grav*`, `Rot*`, `Roll`, `Pitch`, `Yaw`)
-            * physiological channels (`FC`, `SpO2`)
-            * helper column `Second`
+            * `relative_time` (float seconds) or `time`
+            * inertial sensors (`acc_*`, `grav_*`, `rot_*`, `roll`, `pitch`, `yaw`)
+            * physiological channels (`fc`, `spo2`)
+            * helper column `second`
         Returns None if the file cannot be read or is empty.
     """
     try:
@@ -97,21 +95,20 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
         if df.empty:
             raise ValueError(f"The file {os.path.basename(file_path)} is empty.")
 
-        time_col = "Relative_Time" if "Relative_Time" in df.columns else "Time"
+        time_col = "relative_time" if "relative_time" in df.columns else "time"
         if time_col not in df.columns:
-            raise KeyError("No time column found ('Relative_Time' or 'Time').")
+            raise KeyError("No time column found ('relative_time' or 'time').")
 
         df[time_col] = pd.to_numeric(df[time_col], errors="coerce")
         df.dropna(subset=[time_col], inplace=True)
-        df["Second"] = np.floor(df[time_col]).astype(int)
+        df["second"] = np.floor(df[time_col]).astype(int)
 
-        logger.info("✅ Loaded %s (%d rows, %d columns)", os.path.basename(file_path), len(df), len(df.columns))
+        logger.info("Loaded %s (%d rows, %d columns)", os.path.basename(file_path), len(df), len(df.columns))
         return df
 
     except Exception as exc:
-        logger.error("❌ Error loading %s: %s", file_path, exc, exc_info=True)
+        logger.error("Error loading %s: %s", file_path, exc, exc_info=True)
         return None
-
 
 @lru_cache(maxsize=64)
 def load_enriched_session(name: str, *, fallback_to_processed: bool = True) -> Optional[pd.DataFrame]:
@@ -157,7 +154,6 @@ def load_enriched_session(name: str, *, fallback_to_processed: bool = True) -> O
     logger.error("Session %s not found in enriched or processed directories.", name)
     return None
 
-
 def list_enriched_sessions() -> List[str]:
     """Return the list of available enriched parquet files (sorted alphabetically)."""
     if not os.path.isdir(ENRICHED_DIR):
@@ -197,11 +193,11 @@ def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) ->
             .reset_index(drop=True)
         )
 
-        logger.info("📊 Averaged %d rows (1 per second).", len(df_avg))
+        logger.info("Averaged %d rows (1 per second).", len(df_avg))
         return df_avg
 
     except Exception as exc:
-        logger.error("❌ Error averaging data per second: %s", exc, exc_info=True)
+        logger.error("Error averaging data per second: %s", exc, exc_info=True)
         return None
 
 #=======================================================================
@@ -226,7 +222,7 @@ def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True)
         directories.append(PROCESSED_DIR)
 
     if not directories:
-        logger.warning("⚠️ Neither data/enriched nor data/processed directories exist.")
+        logger.warning("Neither data/enriched nor data/processed directories exist.")
         return None
 
     for directory in directories:
@@ -253,9 +249,8 @@ def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True)
             logger.info("📁 Loaded and concatenated %d files (%d total rows) from %s", len(dfs), len(df_all), directory)
             return df_all
 
-    logger.warning("⚠️ No parquet files were loaded successfully from the available directories.")
+    logger.warning("No parquet files were loaded successfully from the available directories.")
     return None
-
 
 @lru_cache(maxsize=8)
 def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -269,18 +264,18 @@ def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
             raise FileNotFoundError(f"Feature dataset not found at: {dataset_path}")
 
         df = pd.read_parquet(dataset_path)
-        logger.info("✅ Feature dataset loaded (%d windows, %d columns).", len(df), len(df.columns))
+        logger.info("Feature dataset loaded (%d windows, %d columns).", len(df), len(df.columns))
         return df
 
     except Exception as exc:
-        logger.error("❌ Error loading feature dataset: %s", exc, exc_info=True)
+        logger.error("Error loading feature dataset: %s", exc, exc_info=True)
         return None
 
 # ======================================================================
 # LOCAL TEST
 # ======================================================================
 if __name__ == "__main__":
-    print("🔍 Quick load test:")
+    print("Quick load test:")
     sessions = list_enriched_sessions()
     if sessions:
         print("First enriched session:", sessions[0])
@@ -298,9 +293,8 @@ if __name__ == "__main__":
 
     df_features = load_features_dataset()
     if df_features is not None:
-        print("\n✅ Feature dataset:")
+        print("\nFeature dataset:")
         print(df_features.head(3))
-
 
 __all__ = [
     "load_data",

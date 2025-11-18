@@ -13,7 +13,7 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 from zipfile import ZipFile
 
 import matplotlib
@@ -50,16 +50,16 @@ DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "eda_figures")
 
 # Centralised metric configuration
 DISTRIBUTION_METRICS: Dict[str, str] = {
-    "Vtr_mean": "Translational velocity per window reflects movement intensity.",
-    "FC_mean": "Average heart rate summarises physiological response to effort.",
-    "Fatigue_Score": "Composite fatigue index derived from biomechanical and physiological signals.",
+    "vtr_mean": "Translational velocity per window reflects movement intensity.",
+    "fc_mean": "Average heart rate summarises physiological response to effort.",
+    "fatigue_score": "Composite fatigue index derived from biomechanical and physiological signals.",
 }
 
 RPE_RELATIONSHIPS: Dict[str, str] = {
-    "Vtr_mean": "Translational velocity tends to decline as perceived exertion grows.",
-    "FC_mean": "Heart rate rises linearly with RPE, validating physiological response.",
+    "vtr_mean": "Translational velocity tends to decline as perceived exertion grows.",
+    "fc_mean": "Heart rate rises linearly with RPE, validating physiological response.",
     "jerk_std": "Movement variability rises with RPE, signalling loss of motor control.",
-    "Fatigue_Score": "Fatigue Score aligns with RPE, bridging objective and subjective fatigue.",
+    "fatigue_score": "Fatigue score aligns with RPE, bridging objective and subjective fatigue.",
 }
 
 # ======================================================================
@@ -199,7 +199,7 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
     paths: List[str] = []
     saved = safe_scatter(
         df,
-        x="FC_mean",
+        x="fc_mean",
         y="reported_rpe",
         hue="session_id" if "session_id" in df.columns else None,
         output_dir=output_dir,
@@ -227,19 +227,9 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
     )
     if saved:
         paths.append(saved)
-    if "Acc_mag_std" in df.columns:
-        saved = safe_boxplot(
-            df,
-            x="reported_rpe",
-            y="Acc_mag_std",
-            output_dir=output_dir,
-            comment="Acceleration variability mirrors degraded motor control.",
-        )
-        if saved:
-            paths.append(saved)
     saved = safe_scatter(
         df,
-        x="Fatigue_Score",
+        x="fatigue_score",
         y="reported_rpe",
         hue="session_id" if "session_id" in df.columns else None,
         output_dir=output_dir,

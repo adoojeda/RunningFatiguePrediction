@@ -22,7 +22,6 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-# Ensure project root on sys.path when executed directly
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -55,7 +54,6 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 CFG = get_config()
 
-
 # ======================================================================
 # DATA CLASSES
 # ======================================================================
@@ -66,7 +64,6 @@ class WindowParams:
     size: float
     step: float
     min_samples: int
-
 
 @dataclass
 class WindowContext:
@@ -114,21 +111,8 @@ def _kurtosis(x: np.ndarray) -> float:
     m = float(np.mean(x))
     s = float(np.std(x, ddof=1))
     if s == 0:
-        return -3.0  # Fisher definition: normal distribution -> 0 (converted to -3 here).
+        return -3.0 
     return float(np.mean(((x - m) / s) ** 4) - 3.0)
-
-
-def _nanmin(x: np.ndarray) -> float:
-    "Safe minimum that returns NaN if no valid samples exist."
-    x = x[~np.isnan(x)]
-    return float(x.min()) if x.size else np.nan
-
-
-def _nanmax(x: np.ndarray) -> float:
-    "Safe maximum that returns NaN if no valid samples exist."
-    x = x[~np.isnan(x)]
-    return float(x.max()) if x.size else np.nan
-
 
 def _create_window_params(window: float, overlap: float) -> WindowParams:
     """Build window parameters ensuring valid step size."""
@@ -137,36 +121,35 @@ def _create_window_params(window: float, overlap: float) -> WindowParams:
         raise ValueError("Computed window step is <= 0. Check window/overlap configuration.")
     return WindowParams(size=window, step=step, min_samples=CFG.windows.min_samples)
 
-
 def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure time ordering and numeric dtypes before windowing."""
-    df = df.sort_values("Relative_Time").reset_index(drop=True)
+    df = df.sort_values("relative_time").reset_index(drop=True)
     numeric_cols = [
-        "AccX_centered", "AccY_centered", "AccZ_centered",
-        "Acc_mag", "Vtr", "jerk_mag", "FC", "SpO2", "Fatigue_Score",
+        "acc_x_centered", "acc_y_centered", "acc_z_centered",
+        "acc_mag", "vtr", "jerk_mag", "fc", "spo2", "fatigue_score",
+        "grav_x", "grav_y", "grav_z",
+        "roll", "pitch", "yaw",
     ]
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
-
 def _iter_windows(df: pd.DataFrame, params: WindowParams) -> Iterator[Tuple[float, float, pd.DataFrame]]:
     """Yield (start, end, df_window) tuples across the dataframe."""
-    t_start = float(df["Relative_Time"].min())
-    t_end = float(df["Relative_Time"].max())
+    t_start = float(df["relative_time"].min())
+    t_end = float(df["relative_time"].max())
     if not np.isfinite(t_start) or not np.isfinite(t_end) or t_end <= t_start:
         raise ValueError("Invalid Relative_Time range.")
 
     current = t_start
     while current + params.size <= t_end + 1e-9:
         w_end = current + params.size
-        mask = (df["Relative_Time"] >= current) & (df["Relative_Time"] < w_end)
+        mask = (df["relative_time"] >= current) & (df["relative_time"] < w_end)
         df_win = df.loc[mask]
         if len(df_win) >= params.min_samples:
             yield current, w_end, df_win
         current += params.step
-
 
 def _safe_stats(x: np.ndarray) -> Tuple[float, float, float]:
     """Return (mean, std, median) handling empty/all-NaN slices gracefully."""
@@ -194,8 +177,8 @@ def compute_window_features(
     out: Dict[str, float] = {}
 
     # Window metadata
-    t0 = float(df_win["Relative_Time"].min())
-    t1 = float(df_win["Relative_Time"].max())
+    t0 = float(df_win["relative_time"].min())
+    t1 = float(df_win["relative_time"].max())
     duration = t1 - t0 if np.isfinite(t1) else np.nan
 
     out["file"] = file_id
@@ -205,8 +188,8 @@ def compute_window_features(
     out["n_samples"] = int(len(df_win))
 
     # Centered accelerations
-    for axis in ["X", "Y", "Z"]:
-        col = f"Acc{axis}_centered"
+    for axis in ["x", "y", "z"]:
+        col = f"acc_{axis}_centered"
         if col in df_win.columns:
             x = df_win[col].to_numpy(dtype=float)
             out[f"{col}_mean"] = np.nanmean(x)
@@ -216,22 +199,32 @@ def compute_window_features(
             out[f"{col}_kurt"] = _kurtosis(x)
 
     # Raw acceleration magnitude
-    if "Acc_mag" in df_win.columns:
-        x = df_win["Acc_mag"].to_numpy(dtype=float)
-        out["Acc_mean"] = np.nanmean(x)
-        out["Acc_std"] = np.nanstd(x, ddof=1)
-        out["Acc_mag_mad"] = _mad(x)
-        out["Acc_mag_skew"] = _skew(x)
-        out["Acc_mag_kurt"] = _kurtosis(x)
+    if "acc_mag" in df_win.columns:
+        x = df_win["acc_mag"].to_numpy(dtype=float)
+        out["acc_mean"] = np.nanmean(x)
+        out["acc_std"] = np.nanstd(x, ddof=1)
+        out["acc_mag_mad"] = _mad(x)
+        out["acc_mag_skew"] = _skew(x)
+        out["acc_mag_kurt"] = _kurtosis(x)
 
     # Translational velocity magnitude
-    if "Vtr" in df_win.columns:
-        v = df_win["Vtr"].to_numpy(dtype=float)
-        out["Vtr_mean"] = np.nanmean(v)
-        out["Vtr_std"] = np.nanstd(v, ddof=1)
-        out["Vtr_mad"] = _mad(v)
-        out["Vtr_skew"] = _skew(v)
-        out["Vtr_kurt"] = _kurtosis(v)
+    if "vtr" in df_win.columns:
+        v = df_win["vtr"].to_numpy(dtype=float)
+        out["vtr_mean"] = np.nanmean(v)
+        out["vtr_std"] = np.nanstd(v, ddof=1)
+        out["vtr_mad"] = _mad(v)
+        out["vtr_skew"] = _skew(v)
+        out["vtr_kurt"] = _kurtosis(v)
+
+    # Orientation / balance signals
+    for ori_col in ["roll", "yaw", "grav_x", "grav_y", "grav_z"]:
+        if ori_col in df_win.columns:
+            val = df_win[ori_col].to_numpy(dtype=float)
+            out[f"{ori_col}_mean"] = np.nanmean(val)
+            out[f"{ori_col}_std"] = np.nanstd(val, ddof=1)
+            out[f"{ori_col}_mad"] = _mad(val)
+            out[f"{ori_col}_skew"] = _skew(val)
+            out[f"{ori_col}_kurt"] = _kurtosis(val)
 
     # Jerk magnitude
     if "jerk_mag" in df_win.columns:
@@ -242,28 +235,28 @@ def compute_window_features(
         out["jerk_skew"] = _skew(j)
 
     # Heart rate (FC)
-    if "FC" in df_win.columns:
-        f = df_win["FC"].to_numpy(dtype=float)
+    if "fc" in df_win.columns:
+        f = df_win["fc"].to_numpy(dtype=float)
         mean, _, _ = _safe_stats(f)
-        out["FC_mean"] = mean
+        out["fc_mean"] = mean
 
     # Oxygen saturation (SpO₂)
-    if "SpO2" in df_win.columns:
-        s = df_win["SpO2"].to_numpy(dtype=float)
+    if "spo2" in df_win.columns:
+        s = df_win["spo2"].to_numpy(dtype=float)
         mean, _, _ = _safe_stats(s)
-        out["SpO2_mean"] = mean
+        out["spo2_mean"] = mean
 
     # Compute fatigue score per window using available metrics
     metrics_payload = {}
-    fc_mean = out.get("FC_mean")
+    fc_mean = out.get("fc_mean")
     if fc_mean is not None and np.isfinite(fc_mean):
-        metrics_payload["FC_mean"] = float(fc_mean)
-    spo2_mean = out.get("SpO2_mean")
+        metrics_payload["fc_mean"] = float(fc_mean)
+    spo2_mean = out.get("spo2_mean")
     if spo2_mean is not None and np.isfinite(spo2_mean):
-        metrics_payload["SpO2_mean"] = float(spo2_mean)
-    acc_std = out.get("Acc_std")
+        metrics_payload["spo2_mean"] = float(spo2_mean)
+    acc_std = out.get("acc_std")
     if acc_std is not None and np.isfinite(acc_std):
-        metrics_payload["Acc_std"] = float(acc_std)
+        metrics_payload["acc_std"] = float(acc_std)
     jerk_std = out.get("jerk_std")
     if jerk_std is not None and np.isfinite(jerk_std):
         metrics_payload["jerk_std"] = float(jerk_std)
@@ -274,16 +267,9 @@ def compute_window_features(
             context="window",
             references=fatigue_refs,
         )
-        fatigue_score = score_dict.get("Fatigue_Score")
+        fatigue_score = score_dict.get("fatigue_score")
         if fatigue_score is not None and np.isfinite(fatigue_score):
-            out["Fatigue_Score"] = fatigue_score
-            components = score_dict.get("Fatigue_components", {})
-            for key, value in components.items():
-                if key == "norm_spo2":
-                    continue
-                if value is None or not np.isfinite(value):
-                    continue
-                out[f"Fatigue_component_{key}"] = value
+            out["fatigue_score"] = fatigue_score
 
     return out
 
@@ -312,8 +298,8 @@ def extract_features_from_file(
         logger.error("Schema validation failed for %s: %s", os.path.basename(fpath), exc)
         return []
 
-    if "Relative_Time" not in df.columns:
-        logger.warning("%s does not contain 'Relative_Time'; skipping.", os.path.basename(fpath))
+    if "relative_time" not in df.columns:
+        logger.warning("%s does not contain 'relative_time'; skipping.", os.path.basename(fpath))
         return []
 
     df = _prepare_dataframe(df)
@@ -462,7 +448,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output path for the feature dataset.")
     parser.add_argument("--source", type=str, default=None, help="Optional directory to read input parquet files from.")
     return parser.parse_args()
-
 
 def main() -> None:
     args = parse_args()

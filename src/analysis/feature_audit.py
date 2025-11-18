@@ -49,20 +49,20 @@ META_COLS = {
     "duration",
     "n_samples",
 }
-TARGET_COLS_BASE = {"reported_rpe", "fatigue_level"}
+TARGET_COLS_BASE = {"reported_rpe", "fatigue_level", "fatigue_score"}
 TARGET_LEAKAGE_MAP = {
-    "Fatigue_Score": [
-        "Fatigue_component_norm_fc",
-        "Fatigue_component_norm_acc",
-        "Fatigue_component_norm_jerk",
-        "Fatigue_component_norm_spo2",
+    "fatigue_score": [
+        "fatigue_component_norm_fc",
+        "fatigue_component_norm_acc",
+        "fatigue_component_norm_jerk",
+        "fatigue_component_norm_spo2",
     ],
     "fatigue_level": [
-        "Fatigue_Score",
-        "Fatigue_component_norm_fc",
-        "Fatigue_component_norm_acc",
-        "Fatigue_component_norm_jerk",
-        "Fatigue_component_norm_spo2",
+        "fatigue_score",
+        "fatigue_component_norm_fc",
+        "fatigue_component_norm_acc",
+        "fatigue_component_norm_jerk",
+        "fatigue_component_norm_spo2",
     ],
 }
 

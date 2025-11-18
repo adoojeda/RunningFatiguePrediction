@@ -55,22 +55,18 @@ class Segment:
 # ======================================================================
 def load_session(path: str) -> pd.DataFrame:
     """
-    Load an enriched/processed parquet file and ensure Vtr & Relative_Time columns exist.
+    Load an enriched/processed parquet file and ensure vtr & relative_time exist.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
 
     df = pd.read_parquet(path)
-    if "Vtr" not in df.columns:
-        raise ValueError("Column 'Vtr' not found in the input file.")
-
-    if "Relative_Time" not in df.columns:
-        if "Tiempo_rel" in df.columns:
-            df = df.rename(columns={"Tiempo_rel": "Relative_Time"})
-        else:
-            raise ValueError("Column 'Relative_Time' not found in the input file.")
-
-    return df.sort_values("Relative_Time").reset_index(drop=True)
+    df = df.rename(columns={"Vtr": "vtr", "Relative_Time": "relative_time", "Tiempo_rel": "relative_time"})
+    if "vtr" not in df.columns:
+        raise ValueError("Column 'vtr' not found in the input file.")
+    if "relative_time" not in df.columns:
+        raise ValueError("Column 'relative_time' not found in the input file.")
+    return df.sort_values("relative_time").reset_index(drop=True)
 
 def select_random_segments(
     df: pd.DataFrame,
@@ -82,7 +78,7 @@ def select_random_segments(
     Randomly select n non-overlapping segments of fixed duration (seconds).
     """
     rng = np.random.default_rng(seed)
-    t_min, t_max = df["Relative_Time"].min(), df["Relative_Time"].max()
+    t_min, t_max = df["relative_time"].min(), df["relative_time"].max()
     total_duration = t_max - t_min
     if total_duration <= duration:
         raise ValueError("Signal is too short for the requested segments.")
@@ -147,21 +143,21 @@ def plot_two_segments_side_by_side(
     )
 
     colors = ["royalblue", "tomato"]
-    global_min = float(df["Vtr"].min())
-    global_max = float(df["Vtr"].max())
+    global_min = float(df["vtr"].min())
+    global_max = float(df["vtr"].max())
 
     for idx, segment in enumerate(segments[:2]):
-        mask = (df["Relative_Time"] >= segment.start) & (df["Relative_Time"] <= segment.end)
+        mask = (df["relative_time"] >= segment.start) & (df["relative_time"] <= segment.end)
         tramo = df.loc[mask]
         if tramo.empty:
             logger.warning("Segment %s contains no samples; skipping.", segment.label())
             continue
 
-        tramo_time = tramo["Relative_Time"] - tramo["Relative_Time"].iloc[0]
+        tramo_time = tramo["relative_time"] - tramo["relative_time"].iloc[0]
         fig.add_trace(
             go.Scatter(
                 x=tramo_time,
-                y=tramo["Vtr"],
+                y=tramo["vtr"],
                 mode="lines",
                 name=f"Segment {idx + 1}",
                 line=dict(color=colors[idx], width=2),
@@ -218,7 +214,7 @@ def main(
     else:
         segments = select_random_segments(df, n_segments=2, duration=duration, seed=seed)
 
-    t_min, t_max = df["Relative_Time"].min(), df["Relative_Time"].max()
+    t_min, t_max = df["relative_time"].min(), df["relative_time"].max()
     for seg in segments:
         if seg.start < t_min or seg.end > t_max:
             raise ValueError(
@@ -266,6 +262,6 @@ if __name__ == "__main__":
             show=args.show,
             manual_segments=manual_segments,
         )
-        logger.info("✅ Visualisation ready: %s%s", html_path, f' and {png_path}' if png_path else "")
+        logger.info("Visualisation ready: %s%s", html_path, f' and {png_path}' if png_path else "")
     except Exception as exc:
-        logger.error("❌ Failed to generate segment comparison: %s", exc, exc_info=True)
+        logger.error("Failed to generate segment comparison: %s", exc, exc_info=True)
