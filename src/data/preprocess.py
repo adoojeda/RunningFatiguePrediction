@@ -3,7 +3,7 @@ Running signal data preprocessing (pipeline stage 1/5):
 - Clean raw CSV recordings into analysis-ready parquet files.
 - Filter physical/physiological outliers and interpolate short gaps in HR/SpO₂.
 - Keep gravity/rotation/orientation signals for downstream biomechanical models.
-- Drop only the absolute timestamp column; create `Relative_Time` instead.
+- Drop only the absolute timestamp column; create `relative_time` instead.
 
 Output: `data/processed/clean_*.parquet`
 Next stage: `python src/features/kinematics.py`
@@ -17,8 +17,7 @@ import logging
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import List, Optional
 
 import pandas as pd
 
@@ -30,9 +29,17 @@ from src.config import get_config
 from src.utils.kinematics import DEFAULT_FS, estimate_sampling_rate
 from src.utils.preprocess_utils import (
     apply_physio_filters,
+    derive_relative_time,
+    ensure_numeric,
     filter_acc_outliers,
+    finalise_dataframe,
     interpolate_channels,
     interp_limit_from_seconds,
+    load_raw_file,
+    PreprocessError,
+    EmptyFileError,
+    ColumnCountError,
+    PreprocessStats,
 )
 from src.utils.schemas import validate_dataframe
 
@@ -48,9 +55,9 @@ logger = logging.getLogger(__name__)
 # ===========================
 # PATHS & CONFIG
 # ===========================
-RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
-PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
-os.makedirs(PROCESSED_DIR, exist_ok=True)
+DEFAULT_RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
+DEFAULT_PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
+os.makedirs(DEFAULT_PROCESSED_DIR, exist_ok=True)
 
 CFG = get_config()
 PHYSIO_RANGES = CFG.ranges
@@ -58,103 +65,17 @@ INTERP_MAX_GAP_SEC = CFG.interpolation.max_gap_seconds
 MAX_WORKERS = CFG.workforce.max_workers
 
 # ===========================
-# CUSTOM ERRORS / DATA CLASSES
-# ===========================
-class PreprocessError(Exception):
-    """Base error for preprocessing issues."""
-
-
-class EmptyFileError(PreprocessError):
-    """Raised when a CSV file has no data."""
-
-
-class ColumnCountError(PreprocessError):
-    """Raised when the incoming CSV does not contain the expected channels."""
-
-@dataclass
-class PreprocessStats:
-    """Summary of per-file operations for richer logging."""
-
-    samples_in: int = 0
-    samples_out: int = 0
-    interpolated_fc: int = 0
-    interpolated_spo2: int = 0
-    acc_outliers_removed: int = 0
-
-    def as_dict(self) -> dict:
-        return {
-            "samples_in": self.samples_in,
-            "samples_out": self.samples_out,
-            "interpolated_fc": self.interpolated_fc,
-            "interpolated_spo2": self.interpolated_spo2,
-            "acc_outliers_removed": self.acc_outliers_removed,
-        }
-
-# ===========================
-# HELPER FUNCTIONS
-# ===========================
-def _load_raw_file(filepath: str) -> pd.DataFrame:
-    """Read raw CSV data and enforce the expected column layout."""
-    df = pd.read_csv(filepath, header=None)
-    if df.empty:
-        raise EmptyFileError("The file is empty.")
-    if df.shape[1] < 15:
-        raise ColumnCountError(f"Expected 15 columns, detected {df.shape[1]}.")
-
-    df.columns = [
-        "time", "acc_x", "acc_y", "acc_z",
-        "grav_x", "grav_y", "grav_z",
-        "rot_x", "rot_y", "rot_z",
-        "roll", "pitch", "yaw",
-        "fc", "spo2",
-    ]
-    return df
-
-def _ensure_numeric(df: pd.DataFrame, columns: Sequence[str]) -> None:
-    """Cast specified columns to numeric dtype in place."""
-    for col in columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-def _derive_relative_time(df: pd.DataFrame) -> pd.DataFrame:
-    """Create relative_time from absolute timestamps."""
-    df = df.dropna(subset=["time"]).reset_index(drop=True)
-    if df.empty:
-        raise PreprocessError("All timestamp values are NaN.")
-    df["relative_time"] = df["time"] - df["time"].iloc[0]
-    df.drop(columns=["time"], inplace=True, errors="ignore")
-    return df
-
-def _finalise_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure column ordering and validate the processed schema."""
-    ordered_columns = ["relative_time"] + [col for col in df.columns if col != "relative_time"]
-    df = df[ordered_columns]
-    validate_dataframe(df, "processed")
-    return df
-
-# ===========================
 # MAIN PREPROCESSING
 # ===========================
 def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
-    """
-    Preprocess a single CSV file into an analysis-ready dataframe.
-
-    Parameters
-    ----------
-    filepath:
-        Path to the raw CSV file.
-
-    Returns
-    -------
-    Optional[pandas.DataFrame]
-        DataFrame with normalised columns and `relative_time`, or None on failure.
-    """
+    """Preprocess a single CSV file into an analysis-ready dataframe."""
     stats = PreprocessStats()
     try:
-        df = _load_raw_file(filepath)
+        df = load_raw_file(filepath)
         stats.samples_in = len(df)
-        _ensure_numeric(df, df.columns)
+        ensure_numeric(df, df.columns)
         validate_dataframe(df, "raw")
-        df = _derive_relative_time(df)
+        df = derive_relative_time(df)
 
         fs_est = estimate_sampling_rate(df["relative_time"]) or DEFAULT_FS
         interp_limit = interp_limit_from_seconds(fs_est, INTERP_MAX_GAP_SEC)
@@ -162,7 +83,7 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
         apply_physio_filters(df, PHYSIO_RANGES.fc, PHYSIO_RANGES.spo2)
         stats.interpolated_fc, stats.interpolated_spo2 = interpolate_channels(df, interp_limit)
         stats.acc_outliers_removed = filter_acc_outliers(df, PHYSIO_RANGES.acc_max)
-        df = _finalise_dataframe(df)
+        df = finalise_dataframe(df)
         stats.samples_out = len(df)
 
         logger.info(
@@ -185,7 +106,7 @@ def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
         )
         return None
 
-def process_file(filepath: str) -> Optional[str]:
+def process_file(filepath: str, output_dir: str) -> Optional[str]:
     """Process a complete file and save it as Parquet."""
     try:
         df = preprocess_single_file(filepath)
@@ -194,7 +115,7 @@ def process_file(filepath: str) -> Optional[str]:
             return None
 
         filename = os.path.basename(filepath).replace(".csv", ".parquet")
-        output_path = os.path.join(PROCESSED_DIR, f"clean_{filename}")
+        output_path = os.path.join(output_dir, f"clean_{filename}")
         df.to_parquet(output_path, index=False)
         logger.info("File processed and saved: %s", output_path)
         return output_path
@@ -202,13 +123,22 @@ def process_file(filepath: str) -> Optional[str]:
         logger.error("Error processing file %s: %s", filepath, exc, exc_info=True)
         return None
 
-def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
+def preprocess_data(
+    parallel: bool = True,
+    input_dir: Optional[str] = None,
+    output_dir: Optional[str] = None,
+) -> Optional[List[str]]:
     """Preprocess all CSV files located in data/raw/."""
-    if not os.path.isdir(RAW_DIR):
-        logger.error("Raw data directory not found: %s", RAW_DIR)
+    src_dir = input_dir or DEFAULT_RAW_DIR
+    dst_dir = output_dir or DEFAULT_PROCESSED_DIR
+
+    if not os.path.isdir(src_dir):
+        logger.error("Raw data directory not found: %s", src_dir)
         return None
 
-    csv_files = [os.path.join(RAW_DIR, f) for f in os.listdir(RAW_DIR) if f.endswith(".csv")]
+    os.makedirs(dst_dir, exist_ok=True)
+
+    csv_files = [os.path.join(src_dir, f) for f in os.listdir(src_dir) if f.endswith(".csv")]
     if not csv_files:
         logger.warning("No CSV files were found in data/raw/.")
         return None
@@ -223,12 +153,12 @@ def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
 
     if parallel and len(csv_files) > 1:
         with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            results = list(executor.map(process_file, csv_files))
+            results = list(executor.map(process_file, csv_files, [dst_dir] * len(csv_files)))
         for fpath, res in zip(csv_files, results):
             _record_result(fpath, res)
     else:
         for f in csv_files:
-            _record_result(f, process_file(f))
+            _record_result(f, process_file(f, dst_dir))
 
     metadata = {
         "processed_files": [p for p in processed_files if p],
@@ -238,7 +168,7 @@ def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
         "date": str(pd.Timestamp.now()),
     }
 
-    metadata_path = os.path.join(PROCESSED_DIR, "metadata.json")
+    metadata_path = os.path.join(dst_dir, "metadata.json")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=4)
 
@@ -251,9 +181,14 @@ def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimized running signal preprocessing.")
     parser.add_argument("--no-parallel", action="store_true", help="Disable parallel execution.")
+    parser.add_argument("--input-dir", help="Custom directory containing raw CSV files.")
+    parser.add_argument("--output-dir", help="Destination directory for processed parquet files.")
     args = parser.parse_args()
-
-    processed = preprocess_data(parallel=not args.no_parallel)
+    processed = preprocess_data(
+        parallel=not args.no_parallel,
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+    )
     if processed:
         logger.info("Preprocessing completed successfully.")
     else:
