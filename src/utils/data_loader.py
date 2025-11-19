@@ -41,7 +41,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
-DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
+DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset.parquet")
 
 def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = None) -> List[str]:
     """Return possible file paths inside *directory* derived from *name* and optional prefixes."""
@@ -200,7 +200,7 @@ def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) ->
         logger.error("Error averaging data per second: %s", exc, exc_info=True)
         return None
 
-#=======================================================================
+#============================
 # BATCH LOADERS
 # ===========================
 @lru_cache(maxsize=8)

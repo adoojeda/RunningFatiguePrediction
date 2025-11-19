@@ -52,31 +52,24 @@ META_COLS = {
 }
 TARGET_COLS_BASE = {"reported_rpe", "fatigue_level", "fatigue_score"}
 TARGET_LEAKAGE_MAP = {
-    "fatigue_score": [
-        "fatigue_component_norm_fc",
-        "fatigue_component_norm_acc",
-        "fatigue_component_norm_jerk",
-        "fatigue_component_norm_spo2",
-    ],
     "fatigue_level": [
         "fatigue_score",
-        "fatigue_component_norm_fc",
-        "fatigue_component_norm_acc",
-        "fatigue_component_norm_jerk",
-        "fatigue_component_norm_spo2",
     ],
 }
 
 # =============================
 # ARGUMENT PARSING
 # =============================
+DEFAULT_DATASET = BASE_DIR / "data" / "results" / "features_dataset.parquet"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Feature audit for the sliding-window dataset.")
     parser.add_argument(
         "--dataset",
         type=str,
-        default=str(BASE_DIR / "data" / "results" / "features_dataset_3s_50olap.parquet"),
-        help="Path to the window parquet (default: 3 s dataset).",
+        default=str(DEFAULT_DATASET),
+        help="Path to the window parquet (default: features_dataset.parquet).",
     )
     parser.add_argument(
         "--target",

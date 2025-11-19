@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # PATH CONFIGURATION
 # ===========================
 RESULTS_DIR = os.path.join(BASE_DIR, "data", "results")
-DEFAULT_DATASET = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
+DEFAULT_DATASET = os.path.join(RESULTS_DIR, "features_dataset.parquet")
 DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "eda_figures")
 
 # Centralised metric configuration
