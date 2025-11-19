@@ -1,14 +1,14 @@
 """
 Sliding-window feature extraction (pipeline stage 4/5).
 
-- Generates overlapping windows (default 3 s, 50% overlap) over enriched sensor data.
+- Generates overlapping windows (default 3 s, 75% overlap) over enriched sensor data.
 - Computes robust statistics for acceleration, translational velocity, jerk, HR, SpO₂ and fatigue score.
 - Tracks per-window quality metrics (sample count, NaN ratios, duration).
 - Joins the resulting features with the RPE mapping (runner/session metadata).
 - Saves the consolidated dataset under `data/results/` (configurable via CLI).
 
 Input: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
-Output: `data/results/features_dataset_3s_50olap.parquet`
+Output: `data/results/features_dataset.parquet`
 Next stage: analysis scripts under `src/analysis/`.
 """
 
@@ -16,8 +16,7 @@ import argparse
 import logging
 import os
 import sys
-from dataclasses import dataclass
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -27,10 +26,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.config import get_config
-from src.data.metrics import compute_fatigue_score, derive_fatigue_references
+from src.utils.metrics_utils import compute_fatigue_score, derive_fatigue_references
 from src.utils.schemas import validate_dataframe
 from src.utils.window_stats import mad, skewness, kurtosis, safe_stats
-from src.utils.window_stats import mad, skewness, kurtosis, safe_stats
+from src.utils.windowing import WindowParams, create_window_params, iter_windows, prepare_dataframe
 
 # ===========================
 # LOGGING SETUP
@@ -51,69 +50,27 @@ ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
 RAW_DIR = os.path.join(DATA_DIR, "raw")
 MAPPING_PATH = os.path.join(RAW_DIR, "rpe_file_mapping.csv")
-DEFAULT_OUTPUT = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
+DEFAULT_OUTPUT = os.path.join(RESULTS_DIR, "features_dataset.parquet")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 CFG = get_config()
 
-# ===========================
-# DATA CLASSES
-# ===========================
-@dataclass(frozen=True)
-class WindowParams:
-    """Configuration for the sliding window process."""
-
-    size: float
-    step: float
-    min_samples: int
-
-@dataclass
-class WindowContext:
-    """Metadata shared across all windows extracted from the same file."""
-
-    file_id: str
-    source_file: str
-    fatigue_refs: Dict[str, float]
-
-# ===========================
-# SLIDING WINDOW GENERATOR
-# ===========================
-def _create_window_params(window: float, overlap: float) -> WindowParams:
-    """Build window parameters ensuring valid step size."""
-    step = window * (1.0 - overlap)
-    if step <= 0:
-        raise ValueError("Computed window step is <= 0. Check window/overlap configuration.")
-    return WindowParams(size=window, step=step, min_samples=CFG.windows.min_samples)
-
-def _prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure time ordering and numeric dtypes before windowing."""
-    df = df.sort_values("relative_time").reset_index(drop=True)
-    numeric_cols = [
-        "acc_x_centered", "acc_y_centered", "acc_z_centered",
-        "acc_mag", "vtr", "jerk_mag", "fc", "spo2", "fatigue_score",
-        "grav_x", "grav_y", "grav_z",
-        "roll", "pitch", "yaw",
-    ]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
-
-def _iter_windows(df: pd.DataFrame, params: WindowParams) -> Iterator[Tuple[float, float, pd.DataFrame]]:
-    """Yield (start, end, df_window) tuples across the dataframe."""
-    t_start = float(df["relative_time"].min())
-    t_end = float(df["relative_time"].max())
-    if not np.isfinite(t_start) or not np.isfinite(t_end) or t_end <= t_start:
-        raise ValueError("Invalid Relative_Time range.")
-
-    current = t_start
-    while current + params.size <= t_end + 1e-9:
-        w_end = current + params.size
-        mask = (df["relative_time"] >= current) & (df["relative_time"] < w_end)
-        df_win = df.loc[mask]
-        if len(df_win) >= params.min_samples:
-            yield current, w_end, df_win
-        current += params.step
+NUMERIC_COLS = [
+    "acc_x_centered",
+    "acc_y_centered",
+    "acc_z_centered",
+    "acc_mag",
+    "vtr",
+    "jerk_mag",
+    "fc",
+    "spo2",
+    "grav_x",
+    "grav_y",
+    "grav_z",
+    "roll",
+    "pitch",
+    "yaw",
+]
 
 # ===========================
 # WINDOW-LEVEL FEATURE COMPUTATION
@@ -199,7 +156,6 @@ def compute_window_features(
         s = df_win["spo2"].to_numpy(dtype=float)
         mean, _, _ = safe_stats(s)
         out["spo2_mean"] = mean
-
     # Compute fatigue score per window using available metrics
     metrics_payload = {}
     fc_mean = out.get("fc_mean")
@@ -256,23 +212,22 @@ def extract_features_from_file(
         logger.warning("%s does not contain 'relative_time'; skipping.", os.path.basename(fpath))
         return []
 
-    df = _prepare_dataframe(df)
+    df = prepare_dataframe(df, NUMERIC_COLS)
     fatigue_refs = derive_fatigue_references(df)
-    params = _create_window_params(window, overlap)
+    params = create_window_params(window, overlap, min_samples=CFG.windows.min_samples)
 
     feats: List[Dict] = []
     source_file = os.path.basename(fpath)
     file_key = file_id or source_file
-    ctx = WindowContext(file_id=file_key, source_file=source_file, fatigue_refs=fatigue_refs)
 
     try:
-        for _, _, df_win in _iter_windows(df, params):
+        for _, _, df_win in iter_windows(df, params):
             feats.append(
                 compute_window_features(
                     df_win,
-                    ctx.file_id,
-                    ctx.source_file,
-                    fatigue_refs=ctx.fatigue_refs,
+                    file_key,
+                    source_file,
+                    fatigue_refs=fatigue_refs,
                 )
             )
     except ValueError as exc:
@@ -396,8 +351,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--overlap",
         type=float,
-        default=CFG.windows.overlap_ratio,
-        help=f"Window overlap [0,1) (default: {CFG.windows.overlap_ratio}).",
+        default=0.75,
+        help="Window overlap [0,1) (default: 0.75).",
     )
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output path for the feature dataset.")
     parser.add_argument("--source", type=str, default=None, help="Optional directory to read input parquet files from.")
@@ -407,7 +362,7 @@ def main() -> None:
     args = parse_args()
 
     if not (0.0 <= args.overlap < 1.0):
-        raise ValueError("The --overlap parameter must be within [0, 1). Recommended value: 0.5.")
+        raise ValueError("The --overlap parameter must be within [0, 1). Recommended value: 0.75.")
 
     run_feature_extraction(
         window=args.window,
