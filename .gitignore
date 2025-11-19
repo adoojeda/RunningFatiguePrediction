@@ -29,10 +29,10 @@ data/results/*
 
 # Except specific important files in data/results
 !data/results/rpe_file_mapping.csv
-!data/results/features_dataset_5s_50olap.parquet
-!data/results/eda_figures/
-!data/results/eda_figures/*.png
-!data/results/eda_figures/*.csv
+data/results/features_dataset_5s_50olap.parquet
+data/results/eda_figures/
+data/results/eda_figures/*.png
+data/results/eda_figures/*.csv
 
 # Documents and temporary files
 *.pdf

@@ -24,18 +24,18 @@ if str(BASE_DIR) not in sys.path:
 from src.utils.data_loader import load_data
 from src.utils.kinematics import DEFAULT_VTR_SMOOTHING
 
-# ======================================================================
-# LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
+# LOGGING SETUP
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
-# PATH CONFIGURATION
-# ======================================================================
+# ===========================
+# PATHS AND CONSTANTS
+# ===========================
 DATA_DIR = BASE_DIR / "data"
 ENRICHED_DIR = DATA_DIR / "enriched"
 EXCLUDED_PREFIXES = ("all_sessions_metrics", "features_dataset")
@@ -61,9 +61,9 @@ COL_RENAME = {
     "Vtr": "vtr",
 }
 
-# ======================================================================
+# ===========================
 # DATA HELPERS
-# ======================================================================
+# ===========================
 def available_files() -> List[Dict[str, str]]:
     """
     Return a list of enriched parquet files available in data/enriched/.
@@ -102,7 +102,9 @@ def relative_time_bounds(df: pd.DataFrame) -> Tuple[float, float]:
         return 0.0, 0.0
     return float(df["relative_time"].min()), float(df["relative_time"].max())
 
-# ======================================================================
+# ===========================
+# SESSION METADATA EXTRACTION
+# ===========================
 def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
     duration = df["relative_time"].max() - df["relative_time"].min() if "relative_time" in df.columns else 0
     info = {
@@ -124,15 +126,15 @@ def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
             info[col] = f"{val:.3f}" if pd.api.types.is_numeric_dtype(df[col]) else str(val)
     return info
 
-# ======================================================================
+# ===========================
 # DASH APP INITIALISATION
-# ======================================================================
+# ===========================
 app = Dash(__name__, external_stylesheets=[dbc.themes.LUX], suppress_callback_exceptions=True)
 app.title = "Running Signals Dashboard"
 
-# ======================================================================
-# LAYOUT
-# ======================================================================
+# ===========================
+# LAYOUT DEFINITION
+# ===========================
 file_options = available_files()
 default_file = file_options[0]["value"] if file_options else None
 
@@ -235,9 +237,9 @@ app.layout = dbc.Container(
     fluid=True,
 )
 
-# ======================================================================
-# Helper: fatigue plot
-# ======================================================================
+# ===========================
+# HELPER FUNCTIONS
+# ===========================
 def render_fatigue_plot(window: pd.DataFrame):
     if "fatigue_score" not in window.columns:
         return dbc.Alert("Fatigue score not available in this file.", color="warning")
@@ -256,9 +258,9 @@ def render_fatigue_plot(window: pd.DataFrame):
     )
     return dcc.Graph(figure=fig)
 
-# ======================================================================
+# ===========================
 # CALLBACKS
-# ======================================================================
+# ===========================
 @app.callback(
     Output("time-slider", "min"),
     Output("time-slider", "max"),
@@ -425,9 +427,9 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
 
     return dbc.Alert("Tab not recognised.", color="danger")
 
-# ======================================================================
+# ===========================
 # LAUNCHER
-# ======================================================================
+# ===========================
 def launch_dashboard(debug: bool = False):
     """Start the Dash application."""
     logger.info("Dashboard available at http://127.0.0.1:8050/")

@@ -25,12 +25,12 @@ from typing import Dict, Tuple
 import numpy as np
 import optuna
 import pandas as pd
+import sys
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from sklearn.metrics import r2_score
 
 # Ensure project root on sys.path
-import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -38,17 +38,21 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.config import get_config
 from src.data.metrics import compute_fatigue_score
 
+# ===================
+# LOGGING SETUP
+# ===================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-
+# ===================
+# HELPER FUNCTIONS
+# ===================
 def load_dataset(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Dataset not found: {path}")
     df = pd.read_parquet(path)
     logger.info("Dataset loaded: %s (%d rows, %d cols)", path, df.shape[0], df.shape[1])
     return df
-
 
 def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[str, float]) -> pd.Series:
     """Recompute fatigue_score per row using the provided weights and references."""
@@ -73,13 +77,11 @@ def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[st
         scores.append(score_dict.get("fatigue_score", np.nan))
     return pd.to_numeric(pd.Series(scores), errors="coerce")
 
-
 def train_eval(df: pd.DataFrame, target_col: str, group_col: str, seed: int) -> float:
     """Train a small HistGB model and return hold-out R²."""
     X = df.drop(columns=[target_col], errors="ignore")
     y = df[target_col].to_numpy()
 
-    # Simple train/test grouped split
     splitter = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=seed)
     groups = df[group_col]
     train_idx, test_idx = next(splitter.split(X, y, groups))
@@ -89,7 +91,6 @@ def train_eval(df: pd.DataFrame, target_col: str, group_col: str, seed: int) -> 
     groups_train = groups.iloc[train_idx]
 
     model = HistGradientBoostingRegressor(random_state=seed, learning_rate=0.05, max_depth=None, max_leaf_nodes=31)
-    # Grouped CV for robustness
     gkf = GroupKFold(n_splits=min(3, groups_train.nunique()))
     r2_cv = []
     for train_cv, val_cv in gkf.split(X_train, y_train, groups_train):
@@ -104,10 +105,8 @@ def train_eval(df: pd.DataFrame, target_col: str, group_col: str, seed: int) -> 
     logger.info("R² CV=%.3f | R² test=%.3f", r2_cv_mean, r2_test)
     return r2_test
 
-
 def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, group_col: str = "runner_id"):
     def objective(trial: optuna.Trial) -> float:
-        # Sample weights and normalise to sum 1
         w_jerk = trial.suggest_float("w_jerk", 0.1, 0.6)
         w_acc = trial.suggest_float("w_acc", 0.1, 0.6)
         w_fc = trial.suggest_float("w_fc", 0.1, 0.6)
@@ -125,12 +124,14 @@ def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, 
         df_target["fatigue_score"] = recompute_fatigue(df_target, weights, refs)
         df_target = df_target.dropna(subset=["fatigue_score"])
         r2 = train_eval(df_target, target_col="fatigue_score", group_col=group_col, seed=seed)
-        # Optuna minimises; we want to maximise R²
+        
         return -r2
 
     return objective
 
-
+# ===================
+# PARSE ARGS
+# ===================
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Optuna search for fatigue score weights.")
     parser.add_argument("--dataset", type=Path, default=Path("data/results/features_dataset_3s_50olap.parquet"))
@@ -139,7 +140,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("data/results/modeling/weight_search"))
     return parser.parse_args()
 
-
+# ===================
+# MAIN ENTRYPOINT
+# ===================
 def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -178,7 +181,6 @@ def main() -> None:
     }
     results_path.write_text(json.dumps(payload, indent=2))
     logger.info("Saved best weights to %s", results_path)
-
 
 if __name__ == "__main__":
     main()

@@ -3,7 +3,7 @@ Utility module to simplify data loading across the running fatigue pipeline.
 
 Main capabilities:
 - Load processed or enriched parquet/CSV files and ensure temporal consistency.
-- Derive a `Second` column from `relative_time` for coarse aggregations.
+- Derive a `second` column from `relative_time` for coarse aggregations.
 - Average numeric signals per second (`average_per_second`).
 - Load the unified feature dataset stored under data/results/.
 - Concatenate multiple sessions for exploratory analysis or validation workflows.
@@ -24,18 +24,18 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
-# ======================================================================
-# LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
+# LOGGING SETUP
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
+# ===========================
 # PATH CONFIGURATION
-# ======================================================================
+# ===========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
@@ -62,9 +62,9 @@ def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = 
             unique_candidates.append(path)
     return unique_candidates
 
-# ======================================================================
+# ===========================
 # CORE LOADERS
-# ======================================================================
+# ===========================
 @lru_cache(maxsize=64)
 def load_data(file_path: str) -> Optional[pd.DataFrame]:
     """
@@ -202,7 +202,7 @@ def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) ->
 
 #=======================================================================
 # BATCH LOADERS
-# ======================================================================
+# ===========================
 @lru_cache(maxsize=8)
 def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True) -> Optional[pd.DataFrame]:
     """
@@ -271,9 +271,9 @@ def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
         logger.error("Error loading feature dataset: %s", exc, exc_info=True)
         return None
 
-# ======================================================================
+# ===========================
 # LOCAL TEST
-# ======================================================================
+# ===========================
 if __name__ == "__main__":
     print("Quick load test:")
     sessions = list_enriched_sessions()

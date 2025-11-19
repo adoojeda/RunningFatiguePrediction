@@ -33,17 +33,17 @@ from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------
+# ===================
 # CONFIGURATION KNOBS
-# ----------------------------------------------------------------------
+# ===================
 CFG = get_config()
 DEFAULT_FS: float = CFG.sampling.default_fs
 DEFAULT_HP_CUTOFF: float = CFG.sampling.highpass_cutoff
 DEFAULT_VTR_SMOOTHING: int = CFG.sampling.vtr_smoothing
 
-# ----------------------------------------------------------------------
+# ===============
 # BASIC HELPERS
-# ----------------------------------------------------------------------
+# ===============
 def estimate_sampling_rate(time: Sequence[float]) -> float:
     """Estimate sampling frequency (Hz) from a monotonic time vector."""
     array = pd.to_numeric(time, errors="coerce").dropna().to_numpy() if isinstance(time, pd.Series) else np.asarray(time)
@@ -96,9 +96,9 @@ def compute_acceleration_magnitudes(
 
     return df
 
-# ----------------------------------------------------------------------
-# Advanced kinematics
-# ----------------------------------------------------------------------
+# =======================
+# ADVANCED KINEMATICS
+# =======================
 def highpass_filter(
     data: np.ndarray,
     fs: float,

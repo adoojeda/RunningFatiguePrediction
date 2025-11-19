@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Tuple
 
+# ===========================
+# ENVIRONMENT VARIABLE HELPERS
+# ===========================
+
 def _get_float(name: str, default: float) -> float:
     """Read a float from the environment with graceful fallback."""
     value = os.getenv(name)
@@ -28,6 +32,10 @@ def _get_int(name: str, default: int) -> int:
         return int(value) if value is not None else int(default)
     except (TypeError, ValueError):
         return int(default)
+    
+# ===========================
+# CONFIGURATION DATACLASSES
+# ===========================
 
 @dataclass(frozen=True)
 class SamplingConfig:
@@ -96,6 +104,9 @@ class PipelineConfig:
     fatigue_refs: FatigueReferences = FatigueReferences()
     workforce: WorkforceConfig = WorkforceConfig()
 
+# ===========================
+# CACHED CONFIGURATION ACCESSOR
+# ===========================
 @lru_cache(maxsize=1)
 def get_config() -> PipelineConfig:
     """Return a cached configuration instance."""

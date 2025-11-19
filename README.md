@@ -22,7 +22,7 @@ This repository processes wearable running signals into modelling- and analysis-
 4. **Feature extraction** – `python src/features/features_extraction.py`
    - input: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
    - output: `data/results/features_dataset_3s_50olap.parquet`
-   - builds sliding-window features (3 s, 50 % solape) alineadas con los RPE reportados
+   - builds sliding-window features (3 s, 50% overlap) aligned with reported RPE
 
 5. **Analysis & dashboards** – scripts in `src/analysis/` and `src/app/`
    - generate EDA figures (`eda_features.py`) and interactive views (`dashboard.py`)
@@ -32,24 +32,13 @@ allow parameter tweaks without touching the code.
 
 ## Feature set used for modeling
 
-After auditing coverage, variance and redundancy, the modeling stage consumes a curated list of window-level features:
-
-- **Physiological**: `FC_mean`, `SpO2_mean`, `Fatigue_Score`, and the fatigue components `Fatigue_component_norm_fc`, `Fatigue_component_norm_acc`, `Fatigue_component_norm_jerk`.
-- **Acceleration (per axis)**: mean, standard deviation, MAD and skew/kurtosis for the centred axes (`AccX/Y/Z_centered_*`).
-- **Acceleration magnitude**: `Acc_mean`, `Acc_std`, `Acc_mag_mad`, `Acc_mag_skew`, `Acc_mag_kurt`.
-- **Translational velocity**: `Vtr_mean`, `Vtr_std`, `Vtr_mad`, `Vtr_skew`, `Vtr_kurt`.
-- **Jerk**: `jerk_mean`, `jerk_std`, `jerk_mad`, `jerk_skew`.
-
-This whitelist lives in `src/models/train_baselines.py` and is applied before training. Any new model that imports the dataset automatically uses the same columns, ensuring reproducibility.
+After auditing coverage, variance and redundancy, the modeling stage consumes a curated list of window-level features, including physiology (`fc_mean`, `spo2_mean`, `fatigue_score`), accelerations per axis (`acc_*centered_*`), magnitudes (`acc_*`), translational velocity (`vtr_*`), jerk (`jerk_*`), and orientation/balance (`roll_*`, `yaw_*`, `grav_*`). The whitelist lives in the modeling scripts (e.g., `src/models/run_experiments.py`) and is applied before training for reproducibility.
 
 ### Preprocessing pipeline
 
-During training, every numeric feature is passed through a `SimpleImputer(strategy="median")` followed by a `StandardScaler` (see `build_models` in `src/models/train_baselines.py`). The preprocessing is encapsulated inside each scikit-learn `Pipeline`, guaranteeing that cross-validation and test evaluation use the exact same transformations.
+During training, every numeric feature is passed through a `SimpleImputer(strategy="median")` followed by a `StandardScaler` inside each scikit-learn `Pipeline`, guaranteeing that cross-validation and test evaluation use the exact same transformations.
 
 ## Modeling workflows
 
-- **Baselines**: `python src/models/train_baselines.py --dataset data/results/features_dataset_3s_50olap.parquet --group runner_id`
-  - trains Gradient Boosting, Random Forest and Linear Regression with grouped CV + hold-out metrics.
-  - uses the curated feature whitelist and saves reports under `data/results/modeling/`.
-- **Experiments**: `python src/models/run_experiments.py --dataset ... --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost --save-predictions --save-models`
-  - runs grouped experiments (runner_id and session_id by default; pass `--grouping` to customize), executes GridSearchCV for each selected model (optionally including XGBoost/CatBoost when installed) and persists metrics, predictions, hashes and serialized models under `data/results/modeling/experiments/`.
+- **Experiments**: `python src/models/run_experiments.py --dataset data/results/features_dataset_3s_50olap.parquet --target fatigue_score --group runner_id --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost --save-predictions --save-models (--fast-grid optional)`
+  - runs grouped experiments (runner_id by default), executes GridSearchCV for each selected model (optionally including XGBoost/CatBoost when installed) and persists metrics, predictions, hashes and serialized models under `data/results/modeling/experiments/`.

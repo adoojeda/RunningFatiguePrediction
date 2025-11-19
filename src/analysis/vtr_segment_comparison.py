@@ -20,18 +20,18 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# ======================================================================
+# ===========================
 # LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
+# ===========================
 # PATH CONFIGURATION
-# ======================================================================
+# ===========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
@@ -39,9 +39,9 @@ PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
 DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "visualisations")
 
-# ======================================================================
-# DATA STRUCTURES
-# ======================================================================
+# ===========================
+# DATA CLASSES
+# ===========================
 @dataclass
 class Segment:
     start: float
@@ -50,9 +50,9 @@ class Segment:
     def label(self) -> str:
         return f"{self.start:.1f}-{self.end:.1f}s"
 
-# ======================================================================
-# HELPERS
-# ======================================================================
+# ===========================
+# HELPER FUNCTIONS
+# ===========================
 def load_session(path: str) -> pd.DataFrame:
     """
     Load an enriched/processed parquet file and ensure vtr & relative_time exist.
@@ -61,7 +61,6 @@ def load_session(path: str) -> pd.DataFrame:
         raise FileNotFoundError(f"File not found: {path}")
 
     df = pd.read_parquet(path)
-    df = df.rename(columns={"Vtr": "vtr", "Relative_Time": "relative_time", "Tiempo_rel": "relative_time"})
     if "vtr" not in df.columns:
         raise ValueError("Column 'vtr' not found in the input file.")
     if "relative_time" not in df.columns:
@@ -91,7 +90,6 @@ def select_random_segments(
 
     logger.info("Random segments selected: %s", [s.label() for s in segments])
     return segments
-
 
 def parse_manual_segments(values: List[float]) -> List[Segment]:
     """Convert a flat list of [start1, end1, start2, end2, ...] into Segment objects."""
@@ -195,9 +193,9 @@ def plot_two_segments_side_by_side(
 
     return html_path, png_path
 
-# ======================================================================
-# PIPELINE
-# ======================================================================
+# ===========================
+# MAIN FUNCTION
+# ===========================
 def main(
     file_path: str,
     duration: float = 2.0,
@@ -232,9 +230,9 @@ def main(
         show_figure=show,
     )
 
-# ======================================================================
-# CLI
-# ======================================================================
+# ===========================
+# ARGUMENT PARSING
+# ===========================
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare two random 2-second Vtr segments from the same session."

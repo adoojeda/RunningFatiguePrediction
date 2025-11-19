@@ -29,19 +29,21 @@ if PROJECT_ROOT not in sys.path:
 from src.config import get_config
 from src.data.metrics import compute_fatigue_score, derive_fatigue_references
 from src.utils.schemas import validate_dataframe
+from src.utils.window_stats import mad, skewness, kurtosis, safe_stats
+from src.utils.window_stats import mad, skewness, kurtosis, safe_stats
 
-# ======================================================================
-# LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
+# LOGGING SETUP
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
-# PATH CONFIGURATION
-# ======================================================================
+# ===========================
+# PATHS AND CONFIG
+# ===========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
@@ -54,9 +56,9 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 CFG = get_config()
 
-# ======================================================================
+# ===========================
 # DATA CLASSES
-# ======================================================================
+# ===========================
 @dataclass(frozen=True)
 class WindowParams:
     """Configuration for the sliding window process."""
@@ -73,47 +75,9 @@ class WindowContext:
     source_file: str
     fatigue_refs: Dict[str, float]
 
-# ======================================================================
-# STATISTICAL UTILITIES
-# ======================================================================
-def _mad(x: np.ndarray) -> float:
-    "Median absolute deviation; high values indicate abrupt movement."
-    x = x[~np.isnan(x)]
-    if x.size == 0:
-        return np.nan
-    med = np.median(x)
-    return float(np.median(np.abs(x - med)))
-
-def _iqr(x: np.ndarray) -> float:
-    "Interquartile range; higher values reflect greater variability."
-    x = x[~np.isnan(x)]
-    if x.size == 0:
-        return np.nan
-    q75, q25 = np.percentile(x, [75, 25])
-    return float(q75 - q25)
-
-def _skew(x: np.ndarray) -> float:
-    "Distribution skewness; deviations may reveal asymmetries in running form."
-    x = x[~np.isnan(x)]
-    if x.size < 3:
-        return np.nan
-    m = float(np.mean(x))
-    s = float(np.std(x, ddof=1))
-    if s == 0:
-        return 0.0
-    return float(np.mean(((x - m) / s) ** 3))
-
-def _kurtosis(x: np.ndarray) -> float:
-    "Excess kurtosis; high values can signal sharp peaks or impacts."
-    x = x[~np.isnan(x)]
-    if x.size < 4:
-        return np.nan
-    m = float(np.mean(x))
-    s = float(np.std(x, ddof=1))
-    if s == 0:
-        return -3.0 
-    return float(np.mean(((x - m) / s) ** 4) - 3.0)
-
+# ===========================
+# SLIDING WINDOW GENERATOR
+# ===========================
 def _create_window_params(window: float, overlap: float) -> WindowParams:
     """Build window parameters ensuring valid step size."""
     step = window * (1.0 - overlap)
@@ -151,19 +115,9 @@ def _iter_windows(df: pd.DataFrame, params: WindowParams) -> Iterator[Tuple[floa
             yield current, w_end, df_win
         current += params.step
 
-def _safe_stats(x: np.ndarray) -> Tuple[float, float, float]:
-    """Return (mean, std, median) handling empty/all-NaN slices gracefully."""
-    cleaned = x[~np.isnan(x)]
-    if cleaned.size == 0:
-        return np.nan, np.nan, np.nan
-    mean = float(np.mean(cleaned))
-    std = float(np.std(cleaned, ddof=1)) if cleaned.size > 1 else 0.0
-    median = float(np.median(cleaned))
-    return mean, std, median
-
-# ======================================================================
+# ===========================
 # WINDOW-LEVEL FEATURE COMPUTATION
-# ======================================================================
+# ===========================
 def compute_window_features(
     df_win: pd.DataFrame,
     file_id: str,
@@ -194,27 +148,27 @@ def compute_window_features(
             x = df_win[col].to_numpy(dtype=float)
             out[f"{col}_mean"] = np.nanmean(x)
             out[f"{col}_std"] = np.nanstd(x, ddof=1)
-            out[f"{col}_mad"] = _mad(x)
-            out[f"{col}_skew"] = _skew(x)
-            out[f"{col}_kurt"] = _kurtosis(x)
+            out[f"{col}_mad"] = mad(x)
+            out[f"{col}_skew"] = skewness(x)
+            out[f"{col}_kurt"] = kurtosis(x)
 
     # Raw acceleration magnitude
     if "acc_mag" in df_win.columns:
         x = df_win["acc_mag"].to_numpy(dtype=float)
         out["acc_mean"] = np.nanmean(x)
         out["acc_std"] = np.nanstd(x, ddof=1)
-        out["acc_mag_mad"] = _mad(x)
-        out["acc_mag_skew"] = _skew(x)
-        out["acc_mag_kurt"] = _kurtosis(x)
+        out["acc_mag_mad"] = mad(x)
+        out["acc_mag_skew"] = skewness(x)
+        out["acc_mag_kurt"] = kurtosis(x)
 
     # Translational velocity magnitude
     if "vtr" in df_win.columns:
         v = df_win["vtr"].to_numpy(dtype=float)
         out["vtr_mean"] = np.nanmean(v)
         out["vtr_std"] = np.nanstd(v, ddof=1)
-        out["vtr_mad"] = _mad(v)
-        out["vtr_skew"] = _skew(v)
-        out["vtr_kurt"] = _kurtosis(v)
+        out["vtr_mad"] = mad(v)
+        out["vtr_skew"] = skewness(v)
+        out["vtr_kurt"] = kurtosis(v)
 
     # Orientation / balance signals
     for ori_col in ["roll", "yaw", "grav_x", "grav_y", "grav_z"]:
@@ -222,28 +176,28 @@ def compute_window_features(
             val = df_win[ori_col].to_numpy(dtype=float)
             out[f"{ori_col}_mean"] = np.nanmean(val)
             out[f"{ori_col}_std"] = np.nanstd(val, ddof=1)
-            out[f"{ori_col}_mad"] = _mad(val)
-            out[f"{ori_col}_skew"] = _skew(val)
-            out[f"{ori_col}_kurt"] = _kurtosis(val)
+            out[f"{ori_col}_mad"] = mad(val)
+            out[f"{ori_col}_skew"] = skewness(val)
+            out[f"{ori_col}_kurt"] = kurtosis(val)
 
     # Jerk magnitude
     if "jerk_mag" in df_win.columns:
         j = df_win["jerk_mag"].to_numpy(dtype=float)
         out["jerk_mean"] = np.nanmean(j)
         out["jerk_std"] = np.nanstd(j, ddof=1)
-        out["jerk_mad"] = _mad(j)
-        out["jerk_skew"] = _skew(j)
+        out["jerk_mad"] = mad(j)
+        out["jerk_skew"] = skewness(j)
 
     # Heart rate (FC)
     if "fc" in df_win.columns:
         f = df_win["fc"].to_numpy(dtype=float)
-        mean, _, _ = _safe_stats(f)
+        mean, _, _ = safe_stats(f)
         out["fc_mean"] = mean
 
     # Oxygen saturation (SpO₂)
     if "spo2" in df_win.columns:
         s = df_win["spo2"].to_numpy(dtype=float)
-        mean, _, _ = _safe_stats(s)
+        mean, _, _ = safe_stats(s)
         out["spo2_mean"] = mean
 
     # Compute fatigue score per window using available metrics
@@ -273,9 +227,9 @@ def compute_window_features(
 
     return out
 
-# ======================================================================
+# ===========================
 # FILE-LEVEL EXTRACTION
-# ======================================================================
+# ===========================
 def extract_features_from_file(
     fpath: str,
     window: float,
@@ -326,9 +280,9 @@ def extract_features_from_file(
 
     return feats
 
-# ======================================================================
-# PIPELINE UTILS
-# ======================================================================
+# ===========================
+# PIPELINE EXECUTION
+# ===========================
 def load_rpe_mapping(path: str) -> pd.DataFrame:
     """Load the RPE mapping file with basic validation."""
     if not os.path.isfile(path):
@@ -423,12 +377,12 @@ def run_feature_extraction(
     else:
         df_out.to_parquet(out_path, index=False)
 
-    logger.info("✅ Features saved to %s (%d windows)", out_path, len(df_out))
+    logger.info(" Features saved to %s (%d windows)", out_path, len(df_out))
     return out_path
 
-# ======================================================================
-# CLI
-# ======================================================================
+# ===========================
+# CLI INTERFACE
+# ===========================
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Sliding-window feature extraction for running fatigue analysis."
@@ -437,13 +391,13 @@ def parse_args() -> argparse.Namespace:
         "--window",
         type=float,
         default=CFG.windows.size_seconds,
-        help=f"Tamaño de ventana en segundos (default: {CFG.windows.size_seconds}).",
+        help=f"Window size in seconds (default: {CFG.windows.size_seconds}).",
     )
     parser.add_argument(
         "--overlap",
         type=float,
         default=CFG.windows.overlap_ratio,
-        help=f"Solape de la ventana [0,1) (default: {CFG.windows.overlap_ratio}).",
+        help=f"Window overlap [0,1) (default: {CFG.windows.overlap_ratio}).",
     )
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output path for the feature dataset.")
     parser.add_argument("--source", type=str, default=None, help="Optional directory to read input parquet files from.")

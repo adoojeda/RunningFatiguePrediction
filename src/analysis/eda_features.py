@@ -18,7 +18,7 @@ from zipfile import ZipFile
 
 import matplotlib
 
-matplotlib.use("Agg")  # Safe backend for headless environments.
+matplotlib.use("Agg")  
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,18 +32,18 @@ if BASE_DIR not in sys.path:
 
 from src.utils.data_loader import load_features_dataset
 
-# ======================================================================
+# ===========================
 # LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
+# ===========================
 # PATH CONFIGURATION
-# ======================================================================
+# ===========================
 RESULTS_DIR = os.path.join(BASE_DIR, "data", "results")
 DEFAULT_DATASET = os.path.join(RESULTS_DIR, "features_dataset_3s_50olap.parquet")
 DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "eda_figures")
@@ -62,9 +62,9 @@ RPE_RELATIONSHIPS: Dict[str, str] = {
     "fatigue_score": "Fatigue score aligns with RPE, bridging objective and subjective fatigue.",
 }
 
-# ======================================================================
-# HELPERS
-# ======================================================================
+# ===========================
+# PLOTTING UTILITIES
+# ===========================
 def add_comment(text: str, bottom: float = -0.08) -> None:
     """Add a contextual comment below the plot."""
     if not text:
@@ -163,10 +163,9 @@ def safe_scatter(
     logger.info("Saved scatter plot: %s", path)
     return path
 
-
-# ======================================================================
-# EDA ROUTINES
-# ======================================================================
+# ===========================
+# EDA PLOTTING FUNCTIONS
+# ===========================
 def plot_distributions(df: pd.DataFrame, output_dir: str, metrics: Optional[Iterable[str]] = None) -> List[str]:
     comments = DISTRIBUTION_METRICS
     selected = list(metrics) if metrics else list(comments)
@@ -240,15 +239,14 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
         paths.append(saved)
     return paths
 
-# ======================================================================
+# ===========================
 # ORCHESTRATION
-# ======================================================================
+# ===========================
 def _ensure_columns(df: pd.DataFrame, required: Iterable[str]) -> None:
     """Raise ValueError if any required column is missing."""
     missing = [col for col in required if col not in df.columns]
     if missing:
         raise ValueError(f"Required columns missing from dataset: {missing}")
-
 
 def run_eda(
     dataset_path: str,
@@ -317,7 +315,6 @@ def run_eda(
     logger.info("EDA completed. Figures stored in %s", timestamped_dir)
     return zip_path
 
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Exploratory data analysis for the sliding-window feature dataset."
@@ -370,6 +367,6 @@ if __name__ == "__main__":
             clean_after_zip=args.clean,
         )
         if zip_path:
-            logger.info("🗜️  Compressed report available at %s", zip_path)
+            logger.info("Compressed report available at %s", zip_path)
     except Exception as exc:
         logger.error("EDA failed: %s", exc, exc_info=True)

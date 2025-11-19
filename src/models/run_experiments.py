@@ -51,96 +51,48 @@ os.environ["LIGHTGBM_NO_DASK"] = "1"
 
 try:
     from catboost import CatBoostRegressor
-except ImportError:  # pragma: no cover
+except ImportError:  
     CatBoostRegressor = None
 
+# =====================
+# LOGGING CONFIGURATION
+# =====================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# ===============================
+# PATH DEFINITIONS AND WHITELISTS
+# ===============================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "results" / "features_dataset_3s_50olap.parquet"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "results" / "modeling" / "experiments"
 FEATURE_WHITELIST = [
     # Heart/oxygen
-    "fc_mean",
-    "spo2_mean",
+    "fc_mean", "spo2_mean",
     # Accelerations
-    "acc_mean",
-    "acc_std",
-    "acc_mag_mad",
-    "acc_mag_skew",
-    "acc_mag_kurt",
-    "acc_x_centered_mean",
-    "acc_x_centered_std",
-    "acc_x_centered_mad",
-    "acc_x_centered_skew",
-    "acc_x_centered_kurt",
-    "acc_y_centered_mean",
-    "acc_y_centered_std",
-    "acc_y_centered_mad",
-    "acc_y_centered_skew",
-    "acc_y_centered_kurt",
-    "acc_z_centered_mean",
-    "acc_z_centered_std",
-    "acc_z_centered_mad",
-    "acc_z_centered_skew",
-    "acc_z_centered_kurt",
+    "acc_mean", "acc_std", "acc_mag_mad", "acc_mag_skew", "acc_mag_kurt",
+    "acc_x_centered_mean", "acc_x_centered_std", "acc_x_centered_mad", "acc_x_centered_skew", "acc_x_centered_kurt",
+    "acc_y_centered_mean", "acc_y_centered_std", "acc_y_centered_mad", "acc_y_centered_skew", "acc_y_centered_kurt",
+    "acc_z_centered_mean", "acc_z_centered_std", "acc_z_centered_mad", "acc_z_centered_skew", "acc_z_centered_kurt",
     # Velocity
-    "vtr_mean",
-    "vtr_std",
-    "vtr_mad",
-    "vtr_skew",
-    "vtr_kurt",
+    "vtr_mean", "vtr_std", "vtr_mad", "vtr_skew", "vtr_kurt",
     # Jerk
-    "jerk_mean",
-    "jerk_std",
-    "jerk_mad",
-    "jerk_skew",
+    "jerk_mean", "jerk_std", "jerk_mad", "jerk_skew",
     # Orientation / balance
-    "roll_mean",
-    "roll_std",
-    "roll_mad",
-    "roll_skew",
-    "roll_kurt",
-    "yaw_mean",
-    "yaw_std",
-    "yaw_mad",
-    "yaw_skew",
-    "yaw_kurt",
-    "grav_x_mean",
-    "grav_x_std",
-    "grav_x_mad",
-    "grav_x_skew",
-    "grav_x_kurt",
-    "grav_y_mean",
-    "grav_y_std",
-    "grav_y_mad",
-    "grav_y_skew",
-    "grav_y_kurt",
-    "grav_z_mean",
-    "grav_z_std",
-    "grav_z_mad",
-    "grav_z_skew",
-    "grav_z_kurt",
+    "roll_mean", "roll_std", "roll_mad", "roll_skew", "roll_kurt",
+    "yaw_mean", "yaw_std", "yaw_mad", "yaw_skew", "yaw_kurt",
+    "grav_x_mean", "grav_x_std", "grav_x_mad", "grav_x_skew", "grav_x_kurt",
+    "grav_y_mean", "grav_y_std", "grav_y_mad", "grav_y_skew", "grav_y_kurt",
+    "grav_z_mean", "grav_z_std", "grav_z_mad", "grav_z_skew", "grav_z_kurt",
 ]
 
-META_COLS = {
-    "file",
-    "source_file",
-    "runner_id",
-    "session_id",
-    "age",
-    "start_s",
-    "duration",
-    "n_samples",
-}
+META_COLS = {"file","source_file","runner_id","session_id","age","start_s","duration","n_samples"}
 TARGET_SIBLINGS = {"reported_rpe", "fatigue_level"}
-TARGET_LEAKAGE_MAP = {
-    "fatigue_score": [],
-    "fatigue_level": ["fatigue_score"],
-}
+TARGET_LEAKAGE_MAP = {"fatigue_score": [],"fatigue_level": ["fatigue_score"]}
 
-
+# ==============================
+# GROUPING AND CONFIG STRUCTURES
+# ==============================
 def build_group_series(df: pd.DataFrame, spec: str) -> pd.Series:
     """Create grouping labels from a spec (single column or '+' separated combination)."""
     columns = spec.split("+")
@@ -179,10 +131,13 @@ class FoldResult:
     max_err: float
     samples: int
 
+# ======================
+# COMMAND-LINE INTERFACE
+# ======================
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Experiment runner for fatigue modeling.")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="Path to the feature parquet.")
-    parser.add_argument("--target", type=str, default="reported_rpe", help="Target column name.")
+    parser.add_argument("--target", type=str, default="fatigue_score", help="Target column name.")
     parser.add_argument("--group", type=str, default="runner_id", help="Grouping column for splits.")
     parser.add_argument("--test-size", type=float, default=0.2, help="Test split proportion.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
@@ -203,6 +158,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fast-grid", action="store_true", help="Use a reduced hyperparameter grid for faster runs.")
     return parser.parse_args()
 
+# ======================
+# DATA LOADING & CLEANING
+# ======================
 def load_dataset(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Dataset file not found: {path}")
@@ -220,6 +178,9 @@ def compute_file_hash(path: Path, chunk_size: int = 1 << 20) -> str:
             md5.update(chunk)
     return md5.hexdigest()
 
+# ======================
+# FEATURE PREPARATION
+# ======================
 def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tuple[pd.DataFrame, pd.Series]:
     if target not in df.columns:
         raise KeyError(f"Target column '{target}' not present in dataset.")
@@ -251,6 +212,9 @@ def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tupl
     X, y = X.loc[mask], y.loc[mask]
     return X, y
 
+# ========================
+# DATA SPLITTING UTILITIES
+# ========================
 def split_data(X, y, groups, *, test_size: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
     splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
     train_idx, test_idx = next(splitter.split(X, y, groups))
@@ -290,6 +254,9 @@ def make_numeric_pipeline(model) -> Pipeline:
         ]
     )
 
+# ========================
+# MODEL + GRID DEFINITIONS
+# ========================
 def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
     n_jobs = 1 if n_jobs == 0 else n_jobs
     if name == "gradient_boosting":
@@ -366,6 +333,9 @@ def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
     pipeline = make_numeric_pipeline(model)
     return pipeline, param_grid
 
+# ===========================
+# CORE EXPERIMENT EXECUTION
+# ===========================
 def run_experiment(cfg: ExperimentConfig) -> None:
     df = load_dataset(cfg.dataset)
     dataset_hash = compute_file_hash(cfg.dataset)
@@ -481,6 +451,9 @@ def run_experiment(cfg: ExperimentConfig) -> None:
         pred_concat.to_parquet(pred_path, index=False)
         logger.info("Predictions saved to %s", pred_path)
 
+# ===================
+# MAIN ENTRY POINT
+# ===================
 def main() -> None:
     args = parse_args()
     cfg = ExperimentConfig(

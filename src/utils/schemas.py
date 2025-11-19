@@ -13,6 +13,9 @@ from typing import Dict, Iterable, List
 import pandas as pd
 from pandas.api import types as ptypes
 
+# ==============================
+# SCHEMA DATASTRUCTURES
+# ==============================
 @dataclass(frozen=True)
 class DataSchema:
     """Minimal schema definition used for dataframe validation."""
@@ -21,6 +24,9 @@ class DataSchema:
     numeric: Iterable[str]
     description: str
 
+# ==============================
+# COLUMN DEFINITIONS (RAW → ENRICHED)
+# ==============================
 RAW_COLUMNS: List[str] = [
     "time",
     "acc_x",
@@ -53,6 +59,9 @@ ENRICHED_COLUMNS: List[str] = [
     "acc_dyn_mag",
 ]
 
+# ==============================
+# SCHEMA REGISTRY
+# ==============================
 SCHEMAS: Dict[str, DataSchema] = {
     "raw": DataSchema(
         name="raw",
@@ -74,6 +83,9 @@ SCHEMAS: Dict[str, DataSchema] = {
     ),
 }
 
+# ==============================
+# DATAFRAME VALIDATION UTILITIES
+# ==============================
 def validate_dataframe(
     df: pd.DataFrame,
     schema_name: str,
@@ -96,6 +108,7 @@ def validate_dataframe(
         raise KeyError(f"Schema '{schema_name}' is not registered.")
 
     schema = SCHEMAS[schema_name]
+
     missing = [col for col in schema.required if col not in df.columns]
     numeric_mismatches = [
         col for col in schema.numeric if col in df.columns and not ptypes.is_numeric_dtype(df[col])
@@ -104,7 +117,8 @@ def validate_dataframe(
     if missing or numeric_mismatches:
         message = (
             f"Dataframe failed '{schema.name}' schema validation. "
-            f"Missing columns: {missing or 'none'}; non-numeric columns: {numeric_mismatches or 'none'}."
+            f"Missing columns: {missing or 'none'}; "
+            f"non-numeric columns: {numeric_mismatches or 'none'}."
         )
         if raise_on_error:
             raise ValueError(message)
@@ -112,4 +126,7 @@ def validate_dataframe(
 
     return True
 
+# ==============================
+# PUBLIC API EXPORTS
+# ==============================
 __all__ = ["validate_dataframe", "SCHEMAS"]

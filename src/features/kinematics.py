@@ -26,25 +26,25 @@ if PROJECT_ROOT not in sys.path:
 from src.utils.kinematics import centre_accelerations, compute_acceleration_magnitudes
 from src.utils.schemas import validate_dataframe
 
-# ======================================================================
-# LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
+# LOGGING SETUP
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
+# ===========================
 # PATH CONFIGURATION
-# ======================================================================
+# ===========================
 BASE_DIR = PROJECT_ROOT
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 ENRICHED_DIR = os.path.join(BASE_DIR, "data", "enriched")
 
-# ======================================================================
+# ===========================
 # CUSTOM TYPES
-# ======================================================================
+# ===========================
 class KinematicsError(Exception):
     """Raised when a kinematic transformation fails."""
 
@@ -57,9 +57,9 @@ class KinematicsStats:
     columns_after: int
     output_path: str
 
-# ======================================================================
-# CORE KINEMATIC FEATURES
-# ======================================================================
+# ===========================
+# CORE LOGIC
+# ===========================
 def compute_kinematics(df: pd.DataFrame) -> pd.DataFrame:
     """
     Ensure centred accelerations and magnitude features exist in the frame.
@@ -111,9 +111,9 @@ def process_single_file(path: str, *, overwrite: bool = False) -> Optional[Kinem
         logger.error("Failed to process %s: %s", os.path.basename(path), exc, exc_info=True)
         return None
 
-# ======================================================================
+# ===========================
 # BATCH PROCESSING
-# ======================================================================
+# ===========================
 def process_all_kinematics(overwrite: bool = False) -> Optional[int]:
     """
     Compute kinematic features for every file in data/processed/.
@@ -143,9 +143,9 @@ def process_all_kinematics(overwrite: bool = False) -> Optional[int]:
 
     return processed
 
-# ======================================================================
+# ===========================
 # MAIN
-# ======================================================================
+# ===========================
 if __name__ == "__main__":
     total = process_all_kinematics()
     if total:

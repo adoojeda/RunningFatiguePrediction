@@ -36,18 +36,18 @@ from src.utils.kinematics import (
 )
 from src.utils.schemas import validate_dataframe
 
-# ======================================================================
-# LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
+# LOGGING
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
-# PATH CONFIGURATION
-# ======================================================================
+# ===========================
+# PATHS & CONFIG
+# ===========================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
@@ -60,9 +60,9 @@ CFG = get_config()
 WEIGHTS = dict(CFG.fatigue_weights.weights)
 DEFAULT_FATIGUE_REFERENCES: Dict[str, float] = dict(CFG.fatigue_refs.references)
 
-# ======================================================================
-# CUSTOM TYPES
-# ======================================================================
+# ===========================
+# DATA CLASSES
+# ===========================
 class MetricsError(Exception):
     """Base exception for the metrics pipeline."""
 
@@ -73,9 +73,9 @@ class SessionResult:
     fatigue_score: float
     metrics: Dict[str, float]
 
-# ======================================================================
+# ===========================
 # SESSION METRICS
-# ======================================================================
+# ===========================
 def compute_session_metrics(df: pd.DataFrame) -> Dict[str, float]:
     """Compute descriptive statistics for biomechanical and physiological signals."""
     metrics: Dict[str, float] = {}
@@ -104,9 +104,9 @@ def compute_session_metrics(df: pd.DataFrame) -> Dict[str, float]:
 
     return metrics
 
-# ======================================================================
+# ===========================
 # FATIGUE REFERENCES
-# ======================================================================
+# ===========================
 def _safe_percentile(series: pd.Series, q: float) -> float:
     """Percentile helper resilient to NaNs and empty inputs."""
     values = pd.to_numeric(series, errors="coerce")
@@ -153,9 +153,9 @@ def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
 
     return refs
 
-# ======================================================================
-# FATIGUE SCORE
-# ======================================================================
+# ===========================
+# FATIGUE SCORING
+# ===========================
 def compute_fatigue_score(
     metrics: Dict[str, float],
     *,
@@ -233,9 +233,9 @@ def compute_fatigue_score(
     }
     return metrics
 
-# ======================================================================
-# DATA HANDLING HELPERS
-# ======================================================================
+# ===========================
+# DATAFRAME HANDLING
+# ===========================
 def _load_session(path: str) -> pd.DataFrame:
     """Load a parquet file and ensure the appropriate schema is satisfied."""
     df = pd.read_parquet(path)
@@ -280,9 +280,9 @@ def _save_enriched(df: pd.DataFrame, path: str) -> bool:
         logger.error("Error saving enriched file %s: %s", os.path.basename(path), exc, exc_info=True)
         return False
 
-# ======================================================================
+# ===========================
 # GLOBAL PROCESSING
-# ======================================================================
+# ===========================
 def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
     """Process a single session file and return the computed metrics."""
     try:
@@ -345,9 +345,9 @@ def process_all_sessions(
     logger.info("Global metrics saved to: %s (%d sessions)", OUTPUT_PARQUET, len(df_all))
     return df_all
 
-# ======================================================================
+# ===========================
 # MAIN
-# ======================================================================
+# ===========================
 if __name__ == "__main__":
     print("Starting advanced metrics computation...")
     print("=" * 50)

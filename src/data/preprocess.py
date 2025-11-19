@@ -36,18 +36,18 @@ from src.utils.preprocess_utils import (
 )
 from src.utils.schemas import validate_dataframe
 
-# ======================================================================
-# LOGGING CONFIGURATION
-# ======================================================================
+# ===========================
+# LOGGING
+# ===========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# ======================================================================
-# PATH CONFIGURATION
-# ======================================================================
+# ===========================
+# PATHS & CONFIG
+# ===========================
 RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
 PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 os.makedirs(PROCESSED_DIR, exist_ok=True)
@@ -57,9 +57,9 @@ PHYSIO_RANGES = CFG.ranges
 INTERP_MAX_GAP_SEC = CFG.interpolation.max_gap_seconds
 MAX_WORKERS = CFG.workforce.max_workers
 
-# ======================================================================
+# ===========================
 # CUSTOM ERRORS / DATA CLASSES
-# ======================================================================
+# ===========================
 class PreprocessError(Exception):
     """Base error for preprocessing issues."""
 
@@ -90,10 +90,9 @@ class PreprocessStats:
             "acc_outliers_removed": self.acc_outliers_removed,
         }
 
-# ======================================================================
+# ===========================
 # HELPER FUNCTIONS
-# ======================================================================
-
+# ===========================
 def _load_raw_file(filepath: str) -> pd.DataFrame:
     """Read raw CSV data and enforce the expected column layout."""
     df = pd.read_csv(filepath, header=None)
@@ -132,9 +131,9 @@ def _finalise_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     validate_dataframe(df, "processed")
     return df
 
-# ======================================================================
+# ===========================
 # MAIN PREPROCESSING
-# ======================================================================
+# ===========================
 def preprocess_single_file(filepath: str) -> Optional[pd.DataFrame]:
     """
     Preprocess a single CSV file into an analysis-ready dataframe.
@@ -246,9 +245,9 @@ def preprocess_data(parallel: bool = True) -> Optional[List[str]]:
     logger.info("Metadata saved to: %s", metadata_path)
     return processed_files
 
-# ======================================================================
+# ===========================
 # MAIN EXECUTION
-# ======================================================================
+# ===========================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimized running signal preprocessing.")
     parser.add_argument("--no-parallel", action="store_true", help="Disable parallel execution.")
