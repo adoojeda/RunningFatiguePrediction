@@ -5,22 +5,30 @@ Displays acceleration, gravity, rotation, orientation, HR/SpO₂, and translatio
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import dash_bootstrap_components as dbc
+import joblib
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from dash import Dash, Input, Output, State, dcc, html
+from dash.exceptions import PreventUpdate
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from src.config import get_config
+from src.features.features_extraction import extract_features_from_file
 from src.utils.data_loader import load_data
 from src.utils.kinematics import DEFAULT_VTR_SMOOTHING
 
@@ -38,7 +46,10 @@ logger = logging.getLogger(__name__)
 # ===========================
 DATA_DIR = BASE_DIR / "data"
 ENRICHED_DIR = DATA_DIR / "enriched"
+EXPERIMENTS_DIR = DATA_DIR / "results" / "modeling" / "experiments"
 EXCLUDED_PREFIXES = ("all_sessions_metrics", "features_dataset")
+DEFAULT_MODEL_NAME = "gradient_boosting"
+CFG = get_config()
 
 # Mapping from legacy/camel columns to snake_case
 COL_RENAME = {
@@ -79,6 +90,19 @@ def available_files() -> List[Dict[str, str]]:
 
     return options
 
+def experiment_options(model_name: str = DEFAULT_MODEL_NAME) -> List[Dict[str, str]]:
+    """
+    List experiment directories that contain the requested model.
+    """
+    if not EXPERIMENTS_DIR.exists():
+        return []
+    dirs = sorted([d for d in EXPERIMENTS_DIR.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime)
+    options: List[Dict[str, str]] = []
+    for d in dirs:
+        if (d / f"{model_name}_best.joblib").exists():
+            options.append({"label": d.name, "value": str(d)})
+    return options
+
 @lru_cache(maxsize=32)
 def load_dataset(path_str: str) -> pd.DataFrame:
     """
@@ -93,6 +117,69 @@ def load_dataset(path_str: str) -> pd.DataFrame:
     except Exception as exc:
         logger.error("Failed to load dataset %s: %s", path_str, exc, exc_info=True)
         return pd.DataFrame()
+
+@lru_cache(maxsize=8)
+def load_pipeline(experiment_path: str, model_name: str):
+    """
+    Load the persisted sklearn pipeline and feature list from an experiment dir.
+    """
+    exp_dir = Path(experiment_path)
+    model_path = exp_dir / f"{model_name}_best.joblib"
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model not found: {model_path}")
+    pipeline = joblib.load(model_path)
+    feature_cols_path = exp_dir / "feature_columns.json"
+    if feature_cols_path.exists():
+        feature_columns = json.loads(feature_cols_path.read_text())
+    else:
+        feature_columns = None
+        logger.warning("feature_columns.json missing in %s; columns inferred from dataframe.", exp_dir.name)
+    return pipeline, feature_columns
+
+def prepare_feature_matrix(df: pd.DataFrame, feature_columns: Optional[List[str]]) -> pd.DataFrame:
+    """
+    Select features in the order expected by the pipeline.
+    """
+    if feature_columns is None:
+        feature_columns = [c for c in df.columns if c not in {"file", "source_file", "start_s", "duration", "n_samples"}]
+    missing = [col for col in feature_columns if col not in df.columns]
+    if missing:
+        logger.warning("Input features missing expected columns: %s", missing)
+    return df.reindex(columns=feature_columns)
+
+def compute_window_predictions(
+    session_path: str,
+    experiment_path: str,
+    model_name: str = DEFAULT_MODEL_NAME,
+    window: float = CFG.windows.size_seconds,
+    overlap: float = CFG.windows.overlap_ratio,
+) -> Tuple[pd.DataFrame, Dict[str, float]]:
+    """
+    Extract sliding-window features from the selected session and run the trained pipeline.
+    """
+    feats = extract_features_from_file(
+        session_path,
+        window=window,
+        overlap=overlap,
+        file_id=Path(session_path).name.replace("enriched_", "clean_", 1),
+    )
+    if not feats:
+        raise RuntimeError("No windows could be generated for this session.")
+    df_windows = pd.DataFrame(feats).sort_values("start_s").reset_index(drop=True)
+    pipeline, feature_columns = load_pipeline(experiment_path, model_name)
+    X = prepare_feature_matrix(df_windows, feature_columns)
+    df_windows["fatigue_pred"] = pipeline.predict(X)
+
+    metrics: Dict[str, float] = {}
+    if "fatigue_score" in df_windows.columns and df_windows["fatigue_score"].notna().any():
+        y_true = df_windows["fatigue_score"].to_numpy()
+        y_pred = df_windows["fatigue_pred"].to_numpy()
+        metrics = {
+            "MAE": float(mean_absolute_error(y_true, y_pred)),
+            "RMSE": float(mean_squared_error(y_true, y_pred, squared=False)),
+            "R2": float(r2_score(y_true, y_pred)),
+        }
+    return df_windows, metrics
 
 def relative_time_bounds(df: pd.DataFrame) -> Tuple[float, float]:
     """
@@ -230,6 +317,7 @@ app.layout = dbc.Container(
                 dcc.Tab(label="🧭 Orientation", value="orient_tab"),
                 dcc.Tab(label="❤️ HR / SpO₂", value="fc_tab"),
                 dcc.Tab(label="🚀 Translational Velocity", value="vtr_tab"),
+                dcc.Tab(label="🧠 Fatigue Inference", value="infer_tab"),
             ],
         ),
         html.Div(id="tab-content", className="mt-3"),
@@ -257,6 +345,71 @@ def render_fatigue_plot(window: pd.DataFrame):
         margin=dict(l=40, r=40, t=60, b=40),
     )
     return dcc.Graph(figure=fig)
+
+def empty_figure(message: str) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        template="plotly_white",
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        annotations=[{"text": message, "xref": "paper", "yref": "paper", "showarrow": False}],
+        margin=dict(l=10, r=10, t=30, b=10),
+    )
+    return fig
+
+def style_inference_line(df: pd.DataFrame) -> go.Figure:
+    if "fatigue_score" in df.columns and df["fatigue_score"].notna().any():
+        long_df = df.melt(
+            id_vars=["start_s"],
+            value_vars=["fatigue_pred", "fatigue_score"],
+            var_name="serie",
+            value_name="valor",
+        )
+    else:
+        long_df = df.assign(serie="fatigue_pred", valor=df["fatigue_pred"])
+    fig = px.line(
+        long_df,
+        x="start_s",
+        y="valor",
+        color="serie",
+        title="Fatigue score: prediction vs. calculated value",
+        labels={"start_s": "Time (s)", "valor": "Fatigue score", "serie": "Series"},
+    )
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(family="Arial", size=12, color="#2a3f5f"),
+        title_font=dict(size=16, color="#1f2c56"),
+        margin=dict(l=40, r=40, t=60, b=40),
+    )
+    return fig
+
+def style_inference_scatter(df: pd.DataFrame) -> go.Figure:
+    if "fatigue_score" not in df.columns or df["fatigue_score"].isna().all():
+        return empty_figure("The session does not contain fatigue_score for comparison.")
+    fig = px.scatter(
+        df,
+        x="fatigue_score",
+        y="fatigue_pred",
+        title="True vs. predicted fatigue score",
+        labels={"fatigue_score": "True score", "fatigue_pred": "Predicted score"},
+    )
+    min_val = float(df[["fatigue_score", "fatigue_pred"]].min().min())
+    max_val = float(df[["fatigue_score", "fatigue_pred"]].max().max())
+    fig.add_shape(
+        type="line",
+        x0=min_val,
+        x1=max_val,
+        y0=min_val,
+        y1=max_val,
+        line=dict(color="gray", dash="dash"),
+    )
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(family="Arial", size=12, color="#2a3f5f"),
+        title_font=dict(size=16, color="#1f2c56"),
+        margin=dict(l=40, r=40, t=60, b=40),
+    )
+    return fig
 
 # ===========================
 # CALLBACKS
@@ -425,7 +578,115 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
             )
         return dcc.Graph(figure=style_fig(fig))
 
+    if selected_tab == "infer_tab":
+        exp_opts = experiment_options()
+        if not exp_opts:
+            return dbc.Alert(
+                "No experiments with gradient_boosting models were found in data/results/modeling/experiments/. "
+                "Run run_experiments.py first.",
+                color="warning",
+            )
+        default_exp = exp_opts[-1]["value"]
+        return html.Div(
+            [
+                html.P(
+                    "Run the trained model over the selected session to compare predicted and actual fatigue scores window by window.",
+                    className="mb-3",
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                html.Label("Select the experiment:"),
+                                dcc.Dropdown(
+                                    id="experiment-dropdown",
+                                    options=exp_opts,
+                                    value=default_exp,
+                                    persistence=True,
+                                    clearable=False,
+                                ),
+                            ],
+                            md=6,
+                        ),
+                        dbc.Col(
+                            [
+                                html.Label("Model:"),
+                                dcc.Input(
+                                    id="model-name-input",
+                                    type="text",
+                                    value=DEFAULT_MODEL_NAME,
+                                    readOnly=True,
+                                    className="form-control",
+                                ),
+                            ],
+                            md=3,
+                        ),
+                        dbc.Col(
+                            [
+                                html.Label("Actions:"),
+                                dbc.Button(
+                                    "Calculate Predictions",
+                                    id="run-inference-btn",
+                                    color="primary",
+                                    className="w-100",
+                                ),
+                            ],
+                            md=3,
+                        ),
+                    ],
+                    className="mb-3",
+                ),
+                html.Div(id="inference-status", className="mb-3"),
+                dcc.Loading(
+                    dcc.Graph(id="inference-graph"),
+                    type="circle",
+                ),
+                dcc.Loading(
+                    dcc.Graph(id="inference-scatter"),
+                    type="circle",
+                ),
+            ],
+            className="p-2",
+        )
+
     return dbc.Alert("Tab not recognised.", color="danger")
+
+@app.callback(
+    Output("inference-status", "children"),
+    Output("inference-graph", "figure"),
+    Output("inference-scatter", "figure"),
+    Input("run-inference-btn", "n_clicks"),
+    State("file-dropdown", "value"),
+    State("experiment-dropdown", "value"),
+    prevent_initial_call=True,
+)
+def run_inference_view(n_clicks: Optional[int], session_path: Optional[str], experiment_path: Optional[str]):
+    if not n_clicks:
+        raise PreventUpdate
+    if not session_path:
+        return dbc.Alert("Select a session first.", color="warning"), empty_figure("Sin datos"), empty_figure("Sin datos")
+    if not experiment_path:
+        return dbc.Alert("Select an experiment directory.", color="warning"), empty_figure("Sin datos"), empty_figure("Sin datos")
+
+    try:
+        df_pred, metrics = compute_window_predictions(session_path, experiment_path, model_name=DEFAULT_MODEL_NAME)
+    except Exception as exc:
+        logger.exception("Inference failed.")
+        msg = dbc.Alert(f"Error during inference: {exc}", color="danger")
+        return msg, empty_figure("Error"), empty_figure("Error")
+
+    status_parts = [
+        html.Div(f"Experiment: {Path(experiment_path).name}"),
+        html.Div(f"Windows: {len(df_pred)}"),
+    ]
+    if metrics:
+        status_parts.append(
+            html.Div(f"MAE={metrics['MAE']:.3f} | RMSE={metrics['RMSE']:.3f} | R²={metrics['R2']:.3f}")
+        )
+    else:
+        status_parts.append(html.Div("The session does not include a fatigue_score; showing predictions only."))
+    status = dbc.Alert(status_parts, color="info")
+    return status, style_inference_line(df_pred), style_inference_scatter(df_pred)
 
 # ===========================
 # LAUNCHER

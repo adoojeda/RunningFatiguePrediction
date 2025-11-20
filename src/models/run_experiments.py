@@ -7,11 +7,10 @@ Responsibilities:
     * Train/evaluate multiple models (GBDT, RF, HistGB, ElasticNet, optional XGBoost/LightGBM/CatBoost).
     * Perform hyperparameter search with GroupKFold (via GridSearchCV).
     * Persist metrics, predictions, and serialized models under data/results/modeling/experiments/.
-    * Support multiple grouping strategies (runner_id, session_id, combinations via '+').
 
 Usage:
     python src/models/run_experiments.py \
-        --dataset data/results/features_dataset_3s_50olap.parquet \
+        --dataset data/results/features_dataset.parquet \
         --group runner_id \
         --output-dir data/results/modeling/experiments \
         --save-predictions \
@@ -64,7 +63,7 @@ logger = logging.getLogger(__name__)
 # PATH DEFINITIONS AND WHITELISTS
 # ===============================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET = PROJECT_ROOT / "data" / "results" / "features_dataset_3s_50olap.parquet"
+DEFAULT_DATASET = PROJECT_ROOT / "data" / "results" / "features_dataset.parquet"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "results" / "modeling" / "experiments"
 FEATURE_WHITELIST = [
     # Heart/oxygen

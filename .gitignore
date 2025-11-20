@@ -28,8 +28,8 @@ data/enriched/*
 data/results/*
 
 # Except specific important files in data/results
-!data/results/rpe_file_mapping.csv
-data/results/features_dataset_5s_50olap.parquet
+!data/raw/rpe_file_mapping.csv
+data/results/features_dataset.parquet
 data/results/eda_figures/
 data/results/eda_figures/*.png
 data/results/eda_figures/*.csv

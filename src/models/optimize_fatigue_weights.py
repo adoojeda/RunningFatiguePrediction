@@ -9,7 +9,7 @@ Strategy:
 
 Usage:
     python src/models/optimize_fatigue_weights.py \
-        --dataset data/results/features_dataset_3s_50olap.parquet \
+        --dataset data/results/features_dataset.parquet \
         --trials 20 \
         --output-dir data/results/modeling/weight_search
 """
@@ -36,7 +36,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import get_config
-from src.data.metrics import compute_fatigue_score
+from src.utils.metrics_utils import compute_fatigue_score
 
 # ===================
 # LOGGING SETUP
