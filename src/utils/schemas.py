@@ -1,8 +1,8 @@
 """
-Data schema definitions and lightweight validators shared across the pipeline.
+Definiciones de esquemas y validadores ligeros compartidos en el pipeline.
 
-Each stage validates its key inputs to catch missing columns or wrong dtypes
-before executing expensive computations.
+Cada etapa valida sus entradas clave para detectar columnas ausentes o tipos
+incorrectos antes de ejecutar cálculos costosos.
 """
 
 from __future__ import annotations
@@ -13,20 +13,16 @@ from typing import Dict, Iterable, List
 import pandas as pd
 from pandas.api import types as ptypes
 
-# ==============================
-# SCHEMA DATASTRUCTURES
-# ==============================
+# ESQUEMA DE DATOS
 @dataclass(frozen=True)
 class DataSchema:
-    """Minimal schema definition used for dataframe validation."""
+    """Esquema mínimo utilizado para validar dataframes."""
     name: str
     required: Iterable[str]
     numeric: Iterable[str]
     description: str
 
-# ==============================
-# COLUMN DEFINITIONS (RAW → ENRICHED)
-# ==============================
+# DEFINICIONES DE COLUMNAS (RAW → ENRICHED)
 RAW_COLUMNS: List[str] = [
     "time",
     "acc_x",
@@ -59,53 +55,38 @@ ENRICHED_COLUMNS: List[str] = [
     "acc_dyn_mag",
 ]
 
-# ==============================
-# SCHEMA REGISTRY
-# ==============================
+# REGISTRO DE ESQUEMAS
 SCHEMAS: Dict[str, DataSchema] = {
     "raw": DataSchema(
         name="raw",
         required=RAW_COLUMNS,
         numeric=RAW_COLUMNS,
-        description="Raw CSV recorded by Apple Watch (90 s window).",
+        description="CSV crudo registrado por el Apple Watch.",
     ),
     "processed": DataSchema(
         name="processed",
         required=PROCESSED_COLUMNS,
         numeric=PROCESSED_COLUMNS,
-        description="Clean parquet produced by src/data/preprocess.py.",
+        description="Parquet limpio generado por src/data/preprocess.py.",
     ),
     "enriched": DataSchema(
         name="enriched",
         required=ENRICHED_COLUMNS,
         numeric=ENRICHED_COLUMNS,
-        description="Parquet enriched with centred accelerations and magnitudes.",
+        description="Parquet enriquecido con aceleraciones centradas y magnitudes.",
     ),
 }
 
-# ==============================
-# DATAFRAME VALIDATION UTILITIES
-# ==============================
+# UTILIDAD DE VALIDACIÓN DE DATAFRAMES
 def validate_dataframe(
     df: pd.DataFrame,
     schema_name: str,
     *,
     raise_on_error: bool = True,
 ) -> bool:
-    """
-    Validate that a dataframe adheres to the requested schema.
-
-    Parameters
-    ----------
-    df:
-        Dataframe to validate.
-    schema_name:
-        Schema key ('raw', 'processed', 'enriched').
-    raise_on_error:
-        When True a ValueError is raised on violations.
-    """
+    """Valida que un DataFrame cumpla el esquema solicitado."""
     if schema_name not in SCHEMAS:
-        raise KeyError(f"Schema '{schema_name}' is not registered.")
+        raise KeyError(f"Esquema desconocido: '{schema_name}'.")
 
     schema = SCHEMAS[schema_name]
 
@@ -116,9 +97,9 @@ def validate_dataframe(
 
     if missing or numeric_mismatches:
         message = (
-            f"Dataframe failed '{schema.name}' schema validation. "
-            f"Missing columns: {missing or 'none'}; "
-            f"non-numeric columns: {numeric_mismatches or 'none'}."
+            f"El DataFrame no cumple el esquema '{schema.name}'. "
+            f"Columnas ausentes: {missing or 'ninguna'}; "
+            f"columnas no numéricas: {numeric_mismatches or 'ninguna'}."
         )
         if raise_on_error:
             raise ValueError(message)
@@ -126,7 +107,4 @@ def validate_dataframe(
 
     return True
 
-# ==============================
-# PUBLIC API EXPORTS
-# ==============================
 __all__ = ["validate_dataframe", "SCHEMAS"]

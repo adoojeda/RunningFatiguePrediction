@@ -1,11 +1,11 @@
 """
-Kinematic feature generation (pipeline stage 2/5):
-- Centre accelerations per axis and compute raw/dynamic magnitudes.
-- Prepare enriched parquet files consumed by metrics and feature extraction stages.
+Generación de características cinemáticas (etapa 2/5 del pipeline):
+- Centra las aceleraciones por eje y calcula magnitudes cruda/dinámica.
+- Produce ficheros enriquecidos que consumen las etapas de métricas y extracción de ventanas.
 
-Input: `data/processed/clean_*.parquet`
-Output: `data/enriched/enriched_*.parquet`
-Next stage: `python src/data/metrics.py`
+Entrada: `data/processed/clean_*.parquet`
+Salida: `data/enriched/enriched_*.parquet`
+Siguiente etapa: `python src/data/metrics.py`
 """
 
 from __future__ import annotations
@@ -26,50 +26,40 @@ if PROJECT_ROOT not in sys.path:
 from src.utils.kinematics import centre_accelerations, compute_acceleration_magnitudes
 from src.utils.schemas import validate_dataframe
 
-# ===========================
-# LOGGING SETUP
-# ===========================
+# CONFIGURACIÓN DE LOGGING
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ===========================
-# PATH CONFIGURATION
-# ===========================
+# CONFIGURACIÓN DE RUTAS
 BASE_DIR = PROJECT_ROOT
 DEFAULT_PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 DEFAULT_ENRICHED_DIR = os.path.join(BASE_DIR, "data", "enriched")
 
-# ===========================
-# CUSTOM TYPES
-# ===========================
+# DEFINICIONES DE TIPOS Y ESTRUCTURAS
 class KinematicsError(Exception):
-    """Raised when a kinematic transformation fails."""
+    """Se lanza cuando falla alguna transformación cinemática."""
 
 @dataclass
 class KinematicsStats:
-    """Simple structure capturing relevant processing metadata."""
+    """Estructura ligera con los metadatos relevantes del proceso."""
 
     file: str
     columns_before: int
     columns_after: int
     output_path: str
 
-# ===========================
-# CORE LOGIC
-# ===========================
+# LÓGICA PRINCIPAL
 def compute_kinematics(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Ensure centred accelerations and magnitude features exist in the frame.
-    """
+    """Garantiza que existan aceleraciones centradas y magnitudes asociadas."""
     centre_accelerations(df)
     compute_acceleration_magnitudes(df)
     return df
 
 def _load_processed_session(path: str) -> pd.DataFrame:
-    """Load a processed parquet file and validate its schema."""
+    """Carga un parquet preprocesado y valida su esquema."""
     df = pd.read_parquet(path)
     validate_dataframe(df, "processed")
     return df
@@ -80,7 +70,7 @@ def _write_enriched_session(
     *,
     output_dir: str,
 ) -> str:
-    """Persist the dataframe to the enriched directory."""
+    """Guarda el dataframe en el directorio de enriquecidos."""
     validate_dataframe(df, "enriched")
     base = os.path.basename(source_path).replace("clean_", "enriched_")
     output_path = os.path.join(output_dir, base)
@@ -92,9 +82,7 @@ def process_single_file(
     *,
     output_dir: str,
 ) -> Optional[KinematicsStats]:
-    """
-    Load → enrich → save a single session. Returns stats or None on failure.
-    """
+    """Carga → enriquece → guarda una sesión. Devuelve estadísticas o None si falla."""
     try:
         df = _load_processed_session(path)
         before_cols = len(df.columns)
@@ -107,23 +95,21 @@ def process_single_file(
             output_path=output_path,
         )
         logger.info(
-            "Kinematic features written to %s (columns: %d → %d)",
+            "Características cinemáticas guardadas en %s (columnas: %d → %d)",
             os.path.basename(output_path),
             stats.columns_before,
             stats.columns_after,
         )
         return stats
     except Exception as exc:
-        logger.error("Failed to process %s: %s", os.path.basename(path), exc, exc_info=True)
+        logger.error("No se pudo procesar %s: %s", os.path.basename(path), exc, exc_info=True)
         return None
 
-# ===========================
-# BATCH PROCESSING
-# ===========================
+# PROCESAMIENTO EN LOTE
 def list_processed_files(source_dir: str) -> List[str]:
-    """Return sorted list of clean parquet files from the provided directory."""
+    """Lista todos los ficheros preprocesados en el directorio dado."""
     if not os.path.isdir(source_dir):
-        raise FileNotFoundError(f"Processed directory not found: {source_dir}")
+        raise FileNotFoundError(f"Directorio no encontrado: {source_dir}")
     files = sorted(
         os.path.join(source_dir, fname)
         for fname in os.listdir(source_dir)
@@ -131,22 +117,13 @@ def list_processed_files(source_dir: str) -> List[str]:
     )
     return files
 
-
 def process_all_kinematics(
     *,
     processed_dir: Optional[str] = None,
     output_dir: Optional[str] = None,
     files: Optional[Sequence[str]] = None,
 ) -> Optional[int]:
-    """
-    Compute kinematic features for every file in data/processed/.
-
-    Parameters
-    ----------
-    overwrite:
-        When True, overwrite the processed parquet file. Otherwise, write results
-        to data/enriched/enriched_*.
-    """
+    """Calcula las características cinemáticas para todos los ficheros disponibles."""
     src_dir = processed_dir or DEFAULT_PROCESSED_DIR
     dst_dir = output_dir or DEFAULT_ENRICHED_DIR
 
@@ -158,7 +135,7 @@ def process_all_kinematics(
             return None
 
     if not files:
-        logger.warning("No preprocessed files found in %s", src_dir)
+        logger.warning("No se encontraron ficheros para procesar en %s.", src_dir)
         return 0
 
     os.makedirs(dst_dir, exist_ok=True)
@@ -171,16 +148,13 @@ def process_all_kinematics(
 
     return processed
 
-# ===========================
 # MAIN
-# ===========================
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate centred accelerations and magnitudes.")
-    parser.add_argument("--input-dir", help="Directory with clean_*.parquet files (default: data/processed).")
-    parser.add_argument("--output-dir", help="Destination directory for enriched files (default: data/enriched).")
-    parser.add_argument("--files", nargs="*", help="Optional explicit list of files to process (paths or basenames).")
+    parser = argparse.ArgumentParser(description="Genera aceleraciones centradas y magnitudes asociadas.")
+    parser.add_argument("--input-dir", help="Directorio con los clean_*.parquet (por defecto data/processed).")
+    parser.add_argument("--output-dir", help="Directorio destino para los enriquecidos (por defecto data/enriched).")
+    parser.add_argument("--files", nargs="*", help="Lista opcional de ficheros a procesar (ruta o nombre).")
     return parser.parse_args()
-
 
 def main() -> None:
     args = parse_args()
@@ -198,10 +172,9 @@ def main() -> None:
         files=file_list,
     )
     if total:
-        logger.info("Completed kinematic feature generation for %d files.", total)
+        logger.info("Generación cinemática completada para %d ficheros.", total)
     elif total == 0:
-        logger.warning("No files were processed.")
-
+        logger.warning("No se procesó ningún fichero.")
 
 if __name__ == "__main__":
     main()

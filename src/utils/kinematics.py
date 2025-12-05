@@ -53,9 +53,7 @@ def estimate_sampling_rate(time: Sequence[float]) -> float:
 
 def centre_accelerations(df: pd.DataFrame, axes: Iterable[str] = ("x", "y", "z"), *, prefix: str = "acc_",
                          suffix: str = "_centered") -> pd.DataFrame:
-    """
-    Sustrae la media de cada eje de aceleración y genera las columnas centradas in-place.
-    """
+    """Sustrae la media de cada eje de aceleración y genera las columnas centradas."""
     for axis in axes:
         col = f"{prefix}{axis}"
         centred = f"{col}{suffix}"
