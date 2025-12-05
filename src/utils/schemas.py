@@ -41,7 +41,7 @@ RAW_COLUMNS: List[str] = [
     "roll",
     "pitch",
     "yaw",
-    "fc",
+    "hr",
     "spo2",
 ]
 

@@ -51,13 +51,13 @@ DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "eda_figures")
 # Centralised metric configuration
 DISTRIBUTION_METRICS: Dict[str, str] = {
     "vtr_mean": "Translational velocity per window reflects movement intensity.",
-    "fc_mean": "Average heart rate summarises physiological response to effort.",
+    "hr_mean": "Average heart rate summarises physiological response to effort.",
     "fatigue_score": "Composite fatigue index derived from biomechanical and physiological signals.",
 }
 
 RPE_RELATIONSHIPS: Dict[str, str] = {
     "vtr_mean": "Translational velocity tends to decline as perceived exertion grows.",
-    "fc_mean": "Heart rate rises linearly with RPE, validating physiological response.",
+    "hr_mean": "Heart rate rises linearly with RPE, validating physiological response.",
     "jerk_std": "Movement variability rises with RPE, signalling loss of motor control.",
     "fatigue_score": "Fatigue score aligns with RPE, bridging objective and subjective fatigue.",
 }
@@ -198,7 +198,7 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
     paths: List[str] = []
     saved = safe_scatter(
         df,
-        x="fc_mean",
+        x="hr_mean",
         y="reported_rpe",
         hue="session_id" if "session_id" in df.columns else None,
         output_dir=output_dir,

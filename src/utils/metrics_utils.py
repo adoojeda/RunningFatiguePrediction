@@ -31,8 +31,8 @@ def compute_session_metrics(df: pd.DataFrame) -> Dict[str, float]:
         metrics["acc_dyn_mean"], metrics["acc_dyn_std"] = safe_stat("acc_dyn_mag")
     if "vtr" in df.columns:
         metrics["vtr_mean"], metrics["vtr_std"] = safe_stat("vtr")
-    if "fc" in df.columns:
-        metrics["fc_mean"], metrics["fc_std"] = safe_stat("fc")
+    if "hr" in df.columns:
+        metrics["hr_mean"], metrics["hr_std"] = safe_stat("hr")
     if "spo2" in df.columns:
         metrics["spo2_mean"], metrics["spo2_std"] = safe_stat("spo2")
     if "jerk_mag" in df.columns:
@@ -55,10 +55,10 @@ def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
     """Estimate fatigue normalisation references from a session dataframe."""
     refs = DEFAULT_FATIGUE_REFERENCES.copy()
 
-    if "fc" in df.columns:
-        fc_95 = _safe_percentile(df["fc"], 95)
-        if np.isfinite(fc_95):
-            refs["fc_max"] = max(fc_95, 1e-6)
+    if "hr" in df.columns:
+        hr_95 = _safe_percentile(df["hr"], 95)
+        if np.isfinite(hr_95):
+            refs["hr_max"] = max(hr_95, 1e-6)
 
     if "spo2" in df.columns:
         spo2_05 = _safe_percentile(df["spo2"], 5)
@@ -100,8 +100,8 @@ def compute_fatigue_score(
     if weights:
         weight_cfg.update({k: v for k, v in weights.items() if k in weight_cfg})
 
-    fc_denominator = max(params["fc_max"], 1e-6)
-    norm_fc = np.clip(metrics.get("fc_mean", 0.0) / fc_denominator, 0.0, 1.0)
+    hr_denominator = max(params["hr_max"], 1e-6)
+    norm_hr = np.clip(metrics.get("hr_mean", 0.0) / hr_denominator, 0.0, 1.0)
 
     spo2_denominator = max(100.0 - params["spo2_min"], 1e-6)
     norm_spo2 = np.clip(
@@ -135,7 +135,7 @@ def compute_fatigue_score(
     fatigue = (
         weight_cfg["jerk"] * norm_jerk
         + weight_cfg["acc"] * norm_acc
-        + weight_cfg["fc"] * norm_fc
+        + weight_cfg["hr"] * norm_hr
         + weight_cfg["spo2"] * norm_spo2
     )
 

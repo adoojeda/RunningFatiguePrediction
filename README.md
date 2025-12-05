@@ -26,7 +26,7 @@ This repository processes wearable running signals into modelling- and analysis-
      | 11       | Roll                   | `roll`        |
      | 12       | Pitch                  | `pitch`       |
      | 13       | Yaw                    | `yaw`         |
-     | 14       | Heart rate             | `fc`          |
+     | 14       | Heart rate             | `hr`          |
      | 15       | Oxygen saturation      | `spo2`        |
 
 2. **Kinematic enrichment** – `python src/features/kinematics.py`
@@ -49,7 +49,7 @@ This repository processes wearable running signals into modelling- and analysis-
 
 ## Feature set used for modeling
 
-After auditing coverage, variance and redundancy, the modeling stage consumes a curated list of window-level features, including physiology (`fc_mean`, `spo2_mean`, `fatigue_score`), accelerations per axis (`acc_*centered_*`), magnitudes (`acc_*`), translational velocity (`vtr_*`), jerk (`jerk_*`), and orientation/balance (`roll_*`, `yaw_*`, `grav_*`). The whitelist lives in the modeling scripts (e.g., `src/models/run_experiments.py`) and is applied before training for reproducibility.
+After auditing coverage, variance and redundancy, the modeling stage consumes a curated list of window-level features, including physiology (`hr_mean`, `spo2_mean`, `fatigue_score`), accelerations per axis (`acc_*centered_*`), magnitudes (`acc_*`), translational velocity (`vtr_*`), jerk (`jerk_*`), and orientation/balance (`roll_*`, `yaw_*`, `grav_*`). The whitelist lives in the modeling scripts (e.g., `src/models/run_experiments.py`) and is applied before training for reproducibility.
 
 ## Modeling workflows
 

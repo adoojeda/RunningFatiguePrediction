@@ -67,7 +67,8 @@ COL_RENAME = {
     "Roll": "roll",
     "Pitch": "pitch",
     "Yaw": "yaw",
-    "FC": "fc",
+    "FC": "hr",
+    "HR": "hr",
     "SpO2": "spo2",
     "Vtr": "vtr",
 }
@@ -315,7 +316,7 @@ app.layout = dbc.Container(
                 dcc.Tab(label="🌍 Gravity", value="grav_tab"),
                 dcc.Tab(label="🔄 Rotation", value="rot_tab"),
                 dcc.Tab(label="🧭 Orientation", value="orient_tab"),
-                dcc.Tab(label="❤️ HR / SpO₂", value="fc_tab"),
+                dcc.Tab(label="❤️ HR / SpO₂", value="hr_tab"),
                 dcc.Tab(label="🚀 Translational Velocity", value="vtr_tab"),
                 dcc.Tab(label="🧠 Fatigue Inference", value="infer_tab"),
             ],
@@ -525,15 +526,15 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
         )
         return dcc.Graph(figure=style_fig(fig))
 
-    if selected_tab == "fc_tab":
+    if selected_tab == "hr_tab":
         graphs = []
-        if "fc" in window.columns:
+        if "hr" in window.columns:
             fig_fc = px.line(
                 window,
                 x="relative_time",
-                y="fc",
+                y="hr",
                 title="Heart rate (bpm)",
-                labels={"fc": "Beats per minute", "relative_time": "Time (s)"},
+                labels={"hr": "Beats per minute", "relative_time": "Time (s)"},
             )
             graphs.append(dcc.Graph(figure=style_fig(fig_fc)))
         if "spo2" in window.columns:

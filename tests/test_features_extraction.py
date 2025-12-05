@@ -20,11 +20,11 @@ def test_compute_window_features_includes_fatigue_score():
             "acc_mag": [0.2, 0.3, 0.4],
             "vtr": [0.1, 0.1, 0.1],
             "jerk_mag": [0.05, 0.06, 0.07],
-            "fc": [120, 125, 130],
+            "hr": [120, 125, 130],
             "spo2": [97, 96, 95],
         }
     )
-    refs = {"fc_max": 150, "spo2_min": 90, "acc_std_ref": 1.0, "jerk_std_ref": 1.0}
+    refs = {"hr_max": 150, "spo2_min": 90, "acc_std_ref": 1.0, "jerk_std_ref": 1.0}
     features = compute_window_features(df_win, "file.parquet", "file.parquet", fatigue_refs=refs)
     assert "fatigue_score" in features
     assert 0.0 <= features["fatigue_score"] <= 1.0

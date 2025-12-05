@@ -2,7 +2,7 @@
 Optuna-based search for fatigue score weights using the window-level feature dataset.
 
 Strategy:
-    - Recompute `fatigue_score` per window with candidate weights over jerk/acc/fc/spo2.
+    - Recompute `fatigue_score` per window with candidate weights over jerk/acc/hr/spo2.
     - Train a lightweight model (HistGradientBoostingRegressor, fast grid) with GroupKFold CV.
     - Evaluate R² on a grouped hold-out split (runner_id) and maximise it.
     - Report best weights and save study results.
@@ -56,14 +56,14 @@ def load_dataset(path: Path) -> pd.DataFrame:
 
 def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[str, float]) -> pd.Series:
     """Recompute fatigue_score per row using the provided weights and references."""
-    needed = ["fc_mean", "spo2_mean", "acc_std", "jerk_std"]
+    needed = ["hr_mean", "spo2_mean", "acc_std", "jerk_std"]
     missing = [c for c in needed if c not in df.columns]
     if missing:
         raise KeyError(f"Missing required columns for fatigue recomputation: {missing}")
     scores = []
     for _, row in df[needed].iterrows():
         metrics_payload = {
-            "fc_mean": float(row["fc_mean"]) if np.isfinite(row["fc_mean"]) else 0.0,
+            "hr_mean": float(row["hr_mean"]) if np.isfinite(row["hr_mean"]) else 0.0,
             "spo2_mean": float(row["spo2_mean"]) if np.isfinite(row["spo2_mean"]) else 0.0,
             "acc_std": float(row["acc_std"]) if np.isfinite(row["acc_std"]) else 0.0,
             "jerk_std": float(row["jerk_std"]) if np.isfinite(row["jerk_std"]) else 0.0,
@@ -109,13 +109,13 @@ def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, 
     def objective(trial: optuna.Trial) -> float:
         w_jerk = trial.suggest_float("w_jerk", 0.1, 0.6)
         w_acc = trial.suggest_float("w_acc", 0.1, 0.6)
-        w_fc = trial.suggest_float("w_fc", 0.1, 0.6)
+        w_hr = trial.suggest_float("w_hr", 0.1, 0.6)
         w_spo2 = trial.suggest_float("w_spo2", 0.05, 0.4)
-        total = w_jerk + w_acc + w_fc + w_spo2
+        total = w_jerk + w_acc + w_hr + w_spo2
         weights = {
             "jerk": w_jerk / total,
             "acc": w_acc / total,
-            "fc": w_fc / total,
+            "hr": w_hr / total,
             "spo2": w_spo2 / total,
         }
 
@@ -164,11 +164,11 @@ def main() -> None:
     study.optimize(objective, n_trials=args.trials, show_progress_bar=False)
 
     best = study.best_params
-    total = best["w_jerk"] + best["w_acc"] + best["w_fc"] + best["w_spo2"]
+    total = best["w_jerk"] + best["w_acc"] + best["w_hr"] + best["w_spo2"]
     best_weights = {
         "jerk": best["w_jerk"] / total,
         "acc": best["w_acc"] / total,
-        "fc": best["w_fc"] / total,
+        "hr": best["w_hr"] / total,
         "spo2": best["w_spo2"] / total,
     }
     logger.info("Best R² (neg) %.4f with weights: %s", study.best_value, best_weights)

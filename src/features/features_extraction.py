@@ -62,7 +62,7 @@ NUMERIC_COLS = [
     "acc_mag",
     "vtr",
     "jerk_mag",
-    "fc",
+    "hr",
     "spo2",
     "grav_x",
     "grav_y",
@@ -145,11 +145,11 @@ def compute_window_features(
         out["jerk_mad"] = mad(j)
         out["jerk_skew"] = skewness(j)
 
-    # Heart rate (FC)
-    if "fc" in df_win.columns:
-        f = df_win["fc"].to_numpy(dtype=float)
+    # Heart rate (HR)
+    if "hr" in df_win.columns:
+        f = df_win["hr"].to_numpy(dtype=float)
         mean, _, _ = safe_stats(f)
-        out["fc_mean"] = mean
+        out["hr_mean"] = mean
 
     # Oxygen saturation (SpO₂)
     if "spo2" in df_win.columns:
@@ -158,9 +158,9 @@ def compute_window_features(
         out["spo2_mean"] = mean
     # Compute fatigue score per window using available metrics
     metrics_payload = {}
-    fc_mean = out.get("fc_mean")
-    if fc_mean is not None and np.isfinite(fc_mean):
-        metrics_payload["fc_mean"] = float(fc_mean)
+    hr_mean = out.get("hr_mean")
+    if hr_mean is not None and np.isfinite(hr_mean):
+        metrics_payload["hr_mean"] = float(hr_mean)
     spo2_mean = out.get("spo2_mean")
     if spo2_mean is not None and np.isfinite(spo2_mean):
         metrics_payload["spo2_mean"] = float(spo2_mean)

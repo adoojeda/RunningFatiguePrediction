@@ -15,7 +15,6 @@ from src.utils.preprocess_utils import (
     apply_physio_filters,
 )
 
-
 def test_load_raw_file_assigns_expected_columns(tmp_path):
     row = list(range(15))
     data = [row]
@@ -37,10 +36,9 @@ def test_load_raw_file_assigns_expected_columns(tmp_path):
         "roll",
         "pitch",
         "yaw",
-        "fc",
+        "hr",
         "spo2",
     ]
-
 
 def test_load_raw_file_invalid_column_count(tmp_path):
     data = [[0.0] * 10]
@@ -50,21 +48,20 @@ def test_load_raw_file_invalid_column_count(tmp_path):
     with pytest.raises(ColumnCountError):
         load_raw_file(str(csv_path))
 
-
 def test_apply_physio_filters_replaces_sentinels_and_outliers():
     df = pd.DataFrame(
         {
-            "fc": [60, 999, 20, 220],
+            "hr": [60, 999, 20, 220],
             "spo2": [95, 999, 60, 110],
         }
     )
-    apply_physio_filters(df, fc_range=(40, 200), spo2_range=(80, 100))
+    apply_physio_filters(df, hr_range=(40, 200), spo2_range=(80, 100))
 
-    assert np.isnan(df.loc[1, "fc"])
+    assert np.isnan(df.loc[1, "hr"])
     assert np.isnan(df.loc[1, "spo2"])
-    assert np.isnan(df.loc[2, "fc"])  # below min
-    assert np.isnan(df.loc[3, "fc"])  # above max
+    assert np.isnan(df.loc[2, "hr"])  
+    assert np.isnan(df.loc[3, "hr"])  
     assert np.isnan(df.loc[2, "spo2"])
     assert np.isnan(df.loc[3, "spo2"])
-    assert df.loc[0, "fc"] == 60
+    assert df.loc[0, "hr"] == 60
     assert df.loc[0, "spo2"] == 95

@@ -67,7 +67,7 @@ DEFAULT_DATASET = PROJECT_ROOT / "data" / "results" / "features_dataset.parquet"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "results" / "modeling" / "experiments"
 FEATURE_WHITELIST = [
     # Heart/oxygen
-    "fc_mean", "spo2_mean",
+    "hr_mean", "spo2_mean",
     # Accelerations
     "acc_mean", "acc_std", "acc_mag_mad", "acc_mag_skew", "acc_mag_kurt",
     "acc_x_centered_mean", "acc_x_centered_std", "acc_x_centered_mad", "acc_x_centered_skew", "acc_x_centered_kurt",

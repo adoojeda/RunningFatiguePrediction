@@ -76,7 +76,7 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
         DataFrame containing at least:
             * `relative_time` (float seconds) or `time`
             * inertial sensors (`acc_*`, `grav_*`, `rot_*`, `roll`, `pitch`, `yaw`)
-            * physiological channels (`fc`, `spo2`)
+            * physiological channels (`hr`, `spo2`)
             * helper column `second`
         Returns None if the file cannot be read or is empty.
     """

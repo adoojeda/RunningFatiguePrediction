@@ -1,9 +1,8 @@
 """
-Centralised configuration for the Running Fatigue Prediction pipeline.
+Configuración centralizada para el pipeline Running Fatigue Prediction.
 
-Every stage (preprocessing, kinematics, metrics, window extraction, modelling)
-consumes these settings so behaviour stays consistent. Values can be overridden
-via environment variables without touching the code.
+Todas las etapas (preprocesamiento, cinemática, métricas, extracción de ventanas y modelado)
+consumen estos ajustes para mantener un comportamiento consistente. 
 """
 
 from __future__ import annotations
@@ -13,12 +12,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Tuple
 
-# ===========================
-# ENVIRONMENT VARIABLE HELPERS
-# ===========================
-
+# AYUDAS PARA VARIABLES DE ENTORNO
 def _get_float(name: str, default: float) -> float:
-    """Read a float from the environment with graceful fallback."""
+    """Lee un float del entorno con retroceso seguro."""
     value = os.getenv(name)
     try:
         return float(value) if value is not None else float(default)
@@ -26,17 +22,14 @@ def _get_float(name: str, default: float) -> float:
         return float(default)
 
 def _get_int(name: str, default: int) -> int:
-    """Read an int from the environment with graceful fallback."""
+    """Lee un int del entorno con retroceso seguro."""
     value = os.getenv(name)
     try:
         return int(value) if value is not None else int(default)
     except (TypeError, ValueError):
         return int(default)
     
-# ===========================
-# CONFIGURATION DATACLASSES
-# ===========================
-
+# DATACLASSES DE CONFIGURACIÓN
 @dataclass(frozen=True)
 class SamplingConfig:
     default_fs: float = _get_float("RFP_DEFAULT_FS", 50.0)
@@ -45,7 +38,7 @@ class SamplingConfig:
 
 @dataclass(frozen=True)
 class PhysiologicalRanges:
-    fc: Tuple[float, float] = (
+    hr: Tuple[float, float] = (
         _get_float("RFP_FC_MIN", 40.0),
         _get_float("RFP_FC_MAX", 220.0),
     )
@@ -62,7 +55,7 @@ class InterpolationConfig:
 @dataclass(frozen=True)
 class WindowingConfig:
     size_seconds: float = _get_float("RFP_WINDOW_SECONDS", 3.0)
-    overlap_ratio: float = _get_float("RFP_WINDOW_OVERLAP", 0.5)
+    overlap_ratio: float = _get_float("RFP_WINDOW_OVERLAP", 0.75)
     min_samples: int = _get_int("RFP_WINDOW_MIN_SAMPLES", 5)
 
 @dataclass(frozen=True)
@@ -73,7 +66,7 @@ class FatigueWeights:
         default_weights = {
             "jerk": _get_float("RFP_FATIGUE_WEIGHT_JERK", 0.459),
             "acc": _get_float("RFP_FATIGUE_WEIGHT_ACC", 0.199),
-            "fc": _get_float("RFP_FATIGUE_WEIGHT_FC", 0.266),
+            "hr": _get_float("RFP_FATIGUE_WEIGHT_FC", 0.266),
             "spo2": _get_float("RFP_FATIGUE_WEIGHT_SPO2", 0.076),
         }
         object.__setattr__(self, "weights", default_weights)
@@ -83,7 +76,7 @@ class FatigueReferences:
     references: Dict[str, float] = None  
     def __post_init__(self) -> None:
         defaults = {
-            "fc_max": _get_float("RFP_FATIGUE_FC_MAX", 200.0),
+            "hr_max": _get_float("RFP_FATIGUE_FC_MAX", 200.0),
             "spo2_min": _get_float("RFP_FATIGUE_SPO2_MIN", 90.0),
             "acc_std_ref": _get_float("RFP_FATIGUE_ACC_STD_REF", 5.0),
             "jerk_std_ref": _get_float("RFP_FATIGUE_JERK_STD_REF", 50.0),
@@ -104,12 +97,10 @@ class PipelineConfig:
     fatigue_refs: FatigueReferences = FatigueReferences()
     workforce: WorkforceConfig = WorkforceConfig()
 
-# ===========================
-# CACHED CONFIGURATION ACCESSOR
-# ===========================
+# ACCESO A CONFIGURACIÓN CACHEADA
 @lru_cache(maxsize=1)
 def get_config() -> PipelineConfig:
-    """Return a cached configuration instance."""
+    """Devuelve una instancia cacheada de la configuración."""
     return PipelineConfig()
 
 __all__ = ["PipelineConfig", "get_config"]

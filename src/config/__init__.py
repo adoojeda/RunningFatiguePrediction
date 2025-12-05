@@ -1,4 +1,4 @@
-"""Configuration helpers for the Running Fatigue Prediction pipeline."""
+"""Utilidades de configuración para el pipeline Running Fatigue Prediction."""
 
 from .settings import PipelineConfig, get_config
 

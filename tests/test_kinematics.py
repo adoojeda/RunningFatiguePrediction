@@ -41,7 +41,7 @@ def test_process_single_file_generates_enriched(tmp_path):
             "roll": [0.0, 0.0, 0.0],
             "pitch": [0.0, 0.0, 0.0],
             "yaw": [0.0, 0.0, 0.0],
-            "fc": [60, 60, 60],
+            "hr": [60, 60, 60],
             "spo2": [98, 98, 98],
         }
     )
