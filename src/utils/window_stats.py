@@ -1,27 +1,23 @@
 """
-Shared statistical helpers for window-based feature computation.
+Funciones estadísticas compartidas para el cálculo de características por ventana.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-# ============================
-# ROBUST STATISTICAL FUNCTIONS
-# ============================
+# DESVIACIÓN ABSOLUTA MEDIANA
 def mad(x: np.ndarray) -> float:
-    """Median absolute deviation; robust to outliers."""
+    """Desviación absoluta mediana; robusta ante valores atípicos."""
     x = x[~np.isnan(x)]
     if x.size == 0:
         return np.nan
     med = np.median(x)
     return float(np.median(np.abs(x - med)))
 
-# ==========================
-# MOMENT-BASED STATISTICS
-# ==========================
+# ASIMETRÍA
 def skewness(x: np.ndarray) -> float:
-    """Sample skewness with NaN handling."""
+    """Asimetría muestral con manejo de NaN."""
     x = x[~np.isnan(x)]
     if x.size < 3:
         return np.nan
@@ -31,8 +27,9 @@ def skewness(x: np.ndarray) -> float:
         return 0.0
     return float(np.mean(((x - m) / s) ** 3))
 
+# CURTOSIS
 def kurtosis(x: np.ndarray) -> float:
-    """Excess kurtosis (Fisher); returns NaN if insufficient samples."""
+    """Curtosis en exceso (Fisher); devuelve NaN si no hay muestras suficientes."""
     x = x[~np.isnan(x)]
     if x.size < 4:
         return np.nan
@@ -42,11 +39,9 @@ def kurtosis(x: np.ndarray) -> float:
         return -3.0
     return float(np.mean(((x - m) / s) ** 4) - 3.0)
 
-# ==========================
-# BASIC SAFE STATISTICS
-# ==========================
+# DEVIACIÓN ESTÁNDAR, MEDIA Y MEDIANA 
 def safe_stats(x: np.ndarray) -> tuple[float, float, float]:
-    """Return (mean, std, median) handling empty/all-NaN slices gracefully."""
+    """Devuelve (media, desviación estándar, mediana) tolerando segmentos vacíos o con NaN."""
     cleaned = x[~np.isnan(x)]
     if cleaned.size == 0:
         return np.nan, np.nan, np.nan
