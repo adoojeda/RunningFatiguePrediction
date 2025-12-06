@@ -1,6 +1,6 @@
 """
-Interactive Dash dashboard to explore enriched running sessions.
-Displays acceleration, gravity, rotation, orientation, HR/SpO₂, and translational velocity.
+Panel interactivo (Dash) para explorar sesiones enriquecidas de running.
+Muestra aceleraciones, gravedad, rotaciones, orientación, FC/SpO₂ y velocidad de traslación.
 """
 
 from __future__ import annotations
@@ -32,18 +32,14 @@ from src.features.features_extraction import extract_features_from_file
 from src.utils.data_loader import load_data
 from src.utils.kinematics import DEFAULT_VTR_SMOOTHING
 
-# ===========================
-# LOGGING SETUP
-# ===========================
+# CONFIGURACIÓN DEL LOGGING
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ===========================
-# PATHS AND CONSTANTS
-# ===========================
+# RUTAS Y CONSTANTES
 DATA_DIR = BASE_DIR / "data"
 ENRICHED_DIR = DATA_DIR / "enriched"
 EXPERIMENTS_DIR = DATA_DIR / "results" / "modeling" / "experiments"
@@ -51,7 +47,7 @@ EXCLUDED_PREFIXES = ("all_sessions_metrics", "features_dataset")
 DEFAULT_MODEL_NAME = "gradient_boosting"
 CFG = get_config()
 
-# Mapping from legacy/camel columns to snake_case
+# Mapeo de columnas legacy/CamelCase a snake_case
 COL_RENAME = {
     "Relative_Time": "relative_time",
     "Tiempo_rel": "relative_time",
@@ -73,13 +69,9 @@ COL_RENAME = {
     "Vtr": "vtr",
 }
 
-# ===========================
-# DATA HELPERS
-# ===========================
+# FUNCIONES AUXILIARES DE DATOS
 def available_files() -> List[Dict[str, str]]:
-    """
-    Return a list of enriched parquet files available in data/enriched/.
-    """
+    """ Devuelve la lista de parquets enriched disponibles en data/enriched/. """
     if not ENRICHED_DIR.exists():
         return []
 
@@ -92,9 +84,7 @@ def available_files() -> List[Dict[str, str]]:
     return options
 
 def experiment_options(model_name: str = DEFAULT_MODEL_NAME) -> List[Dict[str, str]]:
-    """
-    List experiment directories that contain the requested model.
-    """
+    """ Devuelve los experimentos que contienen el modelo indicado."""
     if not EXPERIMENTS_DIR.exists():
         return []
     dirs = sorted([d for d in EXPERIMENTS_DIR.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime)
@@ -106,9 +96,7 @@ def experiment_options(model_name: str = DEFAULT_MODEL_NAME) -> List[Dict[str, s
 
 @lru_cache(maxsize=32)
 def load_dataset(path_str: str) -> pd.DataFrame:
-    """
-    Wrap `load_data` with basic caching to avoid repeated disk reads.
-    """
+    """ Carga un dataset con caché básica para evitar lecturas repetidas."""
     try:
         df = load_data(path_str)
         if df is None:
@@ -116,36 +104,32 @@ def load_dataset(path_str: str) -> pd.DataFrame:
         df = df.rename(columns=COL_RENAME)
         return df
     except Exception as exc:
-        logger.error("Failed to load dataset %s: %s", path_str, exc, exc_info=True)
+        logger.error("No se pudo cargar el dataset %s: %s", path_str, exc, exc_info=True)
         return pd.DataFrame()
 
 @lru_cache(maxsize=8)
 def load_pipeline(experiment_path: str, model_name: str):
-    """
-    Load the persisted sklearn pipeline and feature list from an experiment dir.
-    """
+    """ Carga el pipeline entrenado y la lista de features desde el experimento. """
     exp_dir = Path(experiment_path)
     model_path = exp_dir / f"{model_name}_best.joblib"
     if not model_path.exists():
-        raise FileNotFoundError(f"Model not found: {model_path}")
+        raise FileNotFoundError(f"No se encontró el modelo: {model_path}")
     pipeline = joblib.load(model_path)
     feature_cols_path = exp_dir / "feature_columns.json"
     if feature_cols_path.exists():
         feature_columns = json.loads(feature_cols_path.read_text())
     else:
         feature_columns = None
-        logger.warning("feature_columns.json missing in %s; columns inferred from dataframe.", exp_dir.name)
+        logger.warning("Falta feature_columns.json en %s; se infieren desde el dataframe.", exp_dir.name)
     return pipeline, feature_columns
 
 def prepare_feature_matrix(df: pd.DataFrame, feature_columns: Optional[List[str]]) -> pd.DataFrame:
-    """
-    Select features in the order expected by the pipeline.
-    """
+    """ Selecciona las columnas en el orden esperado por el pipeline. """
     if feature_columns is None:
         feature_columns = [c for c in df.columns if c not in {"file", "source_file", "start_s", "duration", "n_samples"}]
     missing = [col for col in feature_columns if col not in df.columns]
     if missing:
-        logger.warning("Input features missing expected columns: %s", missing)
+        logger.warning("Faltan columnas esperadas en los datos de entrada: %s", missing)
     return df.reindex(columns=feature_columns)
 
 def compute_window_predictions(
@@ -155,9 +139,7 @@ def compute_window_predictions(
     window: float = CFG.windows.size_seconds,
     overlap: float = CFG.windows.overlap_ratio,
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
-    """
-    Extract sliding-window features from the selected session and run the trained pipeline.
-    """
+    """ Extrae ventanas de la sesión seleccionada y aplica el modelo entrenado."""
     feats = extract_features_from_file(
         session_path,
         window=window,
@@ -165,7 +147,7 @@ def compute_window_predictions(
         file_id=Path(session_path).name.replace("enriched_", "clean_", 1),
     )
     if not feats:
-        raise RuntimeError("No windows could be generated for this session.")
+        raise RuntimeError("No se pudieron generar ventanas para esta sesión.")
     df_windows = pd.DataFrame(feats).sort_values("start_s").reset_index(drop=True)
     pipeline, feature_columns = load_pipeline(experiment_path, model_name)
     X = prepare_feature_matrix(df_windows, feature_columns)
@@ -183,22 +165,18 @@ def compute_window_predictions(
     return df_windows, metrics
 
 def relative_time_bounds(df: pd.DataFrame) -> Tuple[float, float]:
-    """
-    Return min/max bounds for the `Relative_Time` column. Falls back to zero-length interval.
-    """
+    """ Devuelve el intervalo mínimo/máximo de `relative_time`."""
     if "relative_time" not in df.columns:
         return 0.0, 0.0
     return float(df["relative_time"].min()), float(df["relative_time"].max())
 
-# ===========================
-# SESSION METADATA EXTRACTION
-# ===========================
+# EXTRACCIÓN DE METADATOS
 def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
     duration = df["relative_time"].max() - df["relative_time"].min() if "relative_time" in df.columns else 0
     info = {
-        "file": os.path.basename(source_path),
-        "rows": f"{len(df):,}",
-        "duration": f"{duration:.1f} s" if duration else "N/A",
+        "archivo": os.path.basename(source_path),
+        "filas": f"{len(df):,}",
+        "duración": f"{duration:.1f} s" if duration else "N/A",
     }
     for col in ("runner_id", "session_id", "reported_rpe", "age", "sex"):
         if col in df.columns:
@@ -207,28 +185,22 @@ def session_metadata(df: pd.DataFrame, source_path: str) -> Dict[str, str]:
                 info[col] = str(unique_vals[0])
             elif unique_vals.size > 1:
                 info[col] = f"Mixed ({unique_vals.size})"
-    # Optional targets
     for col in ("fatigue_score", "fatigue_level"):
         if col in df.columns and df[col].notna().any():
             val = df[col].dropna().iloc[0]
             info[col] = f"{val:.3f}" if pd.api.types.is_numeric_dtype(df[col]) else str(val)
     return info
 
-# ===========================
-# DASH APP INITIALISATION
-# ===========================
+# INICIALIZACIÓN DEL DASHBOARD
 app = Dash(__name__, external_stylesheets=[dbc.themes.LUX], suppress_callback_exceptions=True)
-app.title = "Running Signals Dashboard"
+app.title = "Panel de Señales de Running"
 
-# ===========================
-# LAYOUT DEFINITION
-# ===========================
 file_options = available_files()
 default_file = file_options[0]["value"] if file_options else None
 
 empty_notice = html.Div(
     dbc.Alert(
-        "No enriched parquet files found in data/enriched/. Run the preprocessing, kinematics, and metrics pipelines first.",
+        "No se encontraron parquets enriched en data/enriched/. Ejecuta primero los pipelines de preprocesado, cinemática y métricas.",
         color="warning",
     ),
     className="mb-4",
@@ -236,17 +208,17 @@ empty_notice = html.Div(
 
 app.layout = dbc.Container(
     [
-        html.H1(
-            "Running Signals Dashboard",
+html.H1(
+            "Panel de Señales de Running",
             className="text-center mb-4",
             style={"color": "#1f2c56"},
         ),
         empty_notice if empty_notice else html.Div(),
         dbc.Row(
             [
-                dbc.Col(
+        dbc.Col(
                     [
-                        html.Label("Select enriched session:"),
+                        html.Label("Sesión:"),
                         dcc.Dropdown(
                             id="file-dropdown",
                             options=file_options,
@@ -259,7 +231,7 @@ app.layout = dbc.Container(
                 ),
                 dbc.Col(
                     [
-                        html.Label("Select time range (s):"),
+                        html.Label("Rango temporal (s):"),
                         dcc.RangeSlider(
                             id="time-slider",
                             min=0,
@@ -281,8 +253,8 @@ app.layout = dbc.Container(
                 dbc.Col(
                     dbc.Card(
                         dbc.CardBody([
-                            html.H5("Session metadata", className="card-title"),
-                            html.Div(id="metadata-panel", children="Select a session to inspect its details."),
+                            html.H5("Metadatos de la sesión", className="card-title"),
+                            html.Div(id="metadata-panel", children="Selecciona una sesión para ver los detalles."),
                         ]),
                         className="mb-3",
                     ),
@@ -291,11 +263,11 @@ app.layout = dbc.Container(
                 dbc.Col(
                     dbc.Card(
                         dbc.CardBody([
-                            html.H5("Display options", className="card-title"),
+                            html.H5("Opciones de visualización", className="card-title"),
                             dbc.Checklist(
                                 options=[
-                                    {"label": "Use centred acceleration (if available)", "value": "centered"},
-                                    {"label": "Smooth translational velocity", "value": "smooth"},
+                                    {"label": "Usar aceleración centrada (si existe)", "value": "centered"},
+                                    {"label": "Suavizar velocidad de traslación", "value": "smooth"},
                                 ],
                                 value=["smooth"],
                                 id="display-options",
@@ -312,13 +284,13 @@ app.layout = dbc.Container(
             id="tabs",
             value="acc_tab",
             children=[
-                dcc.Tab(label="📈 Acceleration", value="acc_tab"),
-                dcc.Tab(label="🌍 Gravity", value="grav_tab"),
-                dcc.Tab(label="🔄 Rotation", value="rot_tab"),
-                dcc.Tab(label="🧭 Orientation", value="orient_tab"),
-                dcc.Tab(label="❤️ HR / SpO₂", value="hr_tab"),
-                dcc.Tab(label="🚀 Translational Velocity", value="vtr_tab"),
-                dcc.Tab(label="🧠 Fatigue Inference", value="infer_tab"),
+                dcc.Tab(label="📈 Aceleración", value="acc_tab"),
+                dcc.Tab(label="🌍 Gravedad", value="grav_tab"),
+                dcc.Tab(label="🔄 Rotación", value="rot_tab"),
+                dcc.Tab(label="🧭 Orientación", value="orient_tab"),
+                dcc.Tab(label="❤️ FC / SpO₂", value="hr_tab"),
+                dcc.Tab(label="🚀 Velocidad de traslación", value="vtr_tab"),
+                dcc.Tab(label="🧠 Inferencia de fatiga", value="infer_tab"),
             ],
         ),
         html.Div(id="tab-content", className="mt-3"),
@@ -326,18 +298,16 @@ app.layout = dbc.Container(
     fluid=True,
 )
 
-# ===========================
-# HELPER FUNCTIONS
-# ===========================
+# FUNCIONES DE RENDERIZADO DE GRÁFICOS
 def render_fatigue_plot(window: pd.DataFrame):
     if "fatigue_score" not in window.columns:
-        return dbc.Alert("Fatigue score not available in this file.", color="warning")
+        return dbc.Alert("Este archivo no contiene fatigue_score.", color="warning")
     fig = px.line(
         window,
         x="relative_time",
         y="fatigue_score",
-        title="Fatigue score over time",
-        labels={"relative_time": "Time (s)", "fatigue_score": "Score"},
+        title="Fatigue score a lo largo del tiempo",
+        labels={"relative_time": "Tiempo (s)", "fatigue_score": "Puntuación"},
     )
     fig.update_layout(
         template="plotly_white",
@@ -373,8 +343,8 @@ def style_inference_line(df: pd.DataFrame) -> go.Figure:
         x="start_s",
         y="valor",
         color="serie",
-        title="Fatigue score: prediction vs. calculated value",
-        labels={"start_s": "Time (s)", "valor": "Fatigue score", "serie": "Series"},
+        title="Fatigue score: predicción vs. valor calculado",
+        labels={"start_s": "Tiempo (s)", "valor": "Fatigue score", "serie": "Serie"},
     )
     fig.update_layout(
         template="plotly_white",
@@ -386,13 +356,13 @@ def style_inference_line(df: pd.DataFrame) -> go.Figure:
 
 def style_inference_scatter(df: pd.DataFrame) -> go.Figure:
     if "fatigue_score" not in df.columns or df["fatigue_score"].isna().all():
-        return empty_figure("The session does not contain fatigue_score for comparison.")
+        return empty_figure("La sesión no contiene fatigue_score para comparar.")
     fig = px.scatter(
         df,
         x="fatigue_score",
         y="fatigue_pred",
-        title="True vs. predicted fatigue score",
-        labels={"fatigue_score": "True score", "fatigue_pred": "Predicted score"},
+        title="Fatigue score real vs. predicho",
+        labels={"fatigue_score": "Valor real", "fatigue_pred": "Valor predicho"},
     )
     min_val = float(df[["fatigue_score", "fatigue_pred"]].min().min())
     max_val = float(df[["fatigue_score", "fatigue_pred"]].max().max())
@@ -412,9 +382,7 @@ def style_inference_scatter(df: pd.DataFrame) -> go.Figure:
     )
     return fig
 
-# ===========================
 # CALLBACKS
-# ===========================
 @app.callback(
     Output("time-slider", "min"),
     Output("time-slider", "max"),
@@ -423,9 +391,7 @@ def style_inference_scatter(df: pd.DataFrame) -> go.Figure:
     Input("file-dropdown", "value"),
 )
 def update_time_slider(selected_path: Optional[str]):
-    """
-    Adjust slider bounds based on the chosen file.
-    """
+    """ Ajusta los límites del slider según el archivo seleccionado. """
     if not selected_path:
         default_marks = {i: str(i) for i in range(0, 61, 10)}
         return 0, 60, [0, 60], default_marks
@@ -451,14 +417,13 @@ def update_time_slider(selected_path: Optional[str]):
 )
 def update_metadata_panel(selected_path: Optional[str]):
     if not selected_path:
-        return "Select a session to inspect its details."
+        return "Selecciona una sesión para ver sus detalles."
     df = load_dataset(selected_path)
     if df.empty:
-        return "Unable to load the selected session."
+        return "No se pudo cargar la sesión seleccionada."
     metadata = session_metadata(df, selected_path)
     items = [html.Div([html.Strong(f"{k.replace('_', ' ').title()}:"), f" {v}"]) for k, v in metadata.items()]
     return html.Div(items)
-
 
 @app.callback(
     Output("tab-content", "children"),
@@ -468,22 +433,20 @@ def update_metadata_panel(selected_path: Optional[str]):
     Input("display-options", "value"),
 )
 def render_tab(selected_path: Optional[str], selected_time: List[float], selected_tab: str, options: List[str]):
-    """
-    Render the currently selected tab.
-    """
+    """ Renderiza la pestaña seleccionada. """
     if not selected_path:
-        return dbc.Alert("Please select a session file.", color="secondary")
+        return dbc.Alert("Por favor selecciona un archivo de sesión.", color="secondary")
 
     df = load_dataset(selected_path)
     if df.empty:
-        return dbc.Alert("Unable to load the selected file or it contains no data.", color="danger")
+        return dbc.Alert("No se pudo cargar el archivo seleccionado o no contiene datos.", color="danger")
     if "relative_time" not in df.columns:
-        return dbc.Alert("The dataset does not include a valid time column.", color="danger")
+        return dbc.Alert("El dataset no incluye una columna de tiempo válida.", color="danger")
 
     start, end = selected_time
     window = df[(df["relative_time"] >= start) & (df["relative_time"] <= end)].copy()
     if window.empty:
-        return dbc.Alert("No samples available for the selected time interval.", color="warning")
+        return dbc.Alert("No hay muestras para el intervalo seleccionado.", color="warning")
 
     use_centered = "centered" in (options or [])
     smooth_vtr = "smooth" in (options or [])
@@ -499,10 +462,10 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
         return fig
 
     axis_tabs = {
-        "acc_tab": (["acc_x", "acc_y", "acc_z"], "Acceleration (m/s²)", "Acceleration (m/s²)"),
-        "grav_tab": (["grav_x", "grav_y", "grav_z"], "Gravity components (g)", "Gravity (g)"),
-        "rot_tab": (["rot_x", "rot_y", "rot_z"], "Angular velocity (rad/s)", "Angular velocity (rad/s)"),
-        "orient_tab": (["roll", "pitch", "yaw"], "Orientation (rad)", "Angle (rad)"),
+        "acc_tab": (["acc_x", "acc_y", "acc_z"], "Aceleración (g)", "Aceleración (g)"),
+        "grav_tab": (["grav_x", "grav_y", "grav_z"], "Componentes de gravedad (g)", "Gravedad (g)"),
+        "rot_tab": (["rot_x", "rot_y", "rot_z"], "Velocidad angular (rad/s)", "Velocidad angular (rad/s)"),
+        "orient_tab": (["roll", "pitch", "yaw"], "Orientación (rad)", "Ángulo (rad)"),
     }
 
     if selected_tab in axis_tabs:
@@ -511,18 +474,18 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
             centred_cols = [c + "_centered" for c in cols]
             available = [c for c in centred_cols if c in window.columns]
             display_cols = available
-            y_label += " (centered)"
+            y_label += " (centrada)"
         else:
             available = [c for c in cols if c in window.columns]
             display_cols = available
         if not available:
-            return dbc.Alert(f"Expected columns not found: {cols}", color="warning")
+            return dbc.Alert(f"No se encuentran las columnas esperadas: {cols}", color="warning")
         fig = px.line(
             window,
             x="relative_time",
             y=display_cols,
             title=title,
-            labels={"value": y_label, "variable": "Axis", "relative_time": "Time (s)"},
+            labels={"value": y_label, "variable": "Eje", "relative_time": "Tiempo (s)"},
         )
         return dcc.Graph(figure=style_fig(fig))
 
@@ -533,8 +496,8 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
                 window,
                 x="relative_time",
                 y="hr",
-                title="Heart rate (bpm)",
-                labels={"hr": "Beats per minute", "relative_time": "Time (s)"},
+                title="Frecuencia cardiaca (bpm)",
+                labels={"hr": "Pulsaciones/min", "relative_time": "Tiempo (s)"},
             )
             graphs.append(dcc.Graph(figure=style_fig(fig_fc)))
         if "spo2" in window.columns:
@@ -542,25 +505,25 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
                 window,
                 x="relative_time",
                 y="spo2",
-                title="Pulse oximetry (SpO₂ %)",
-                labels={"spo2": "Percentage (%)", "relative_time": "Time (s)"},
+                title="Oximetría (SpO₂ %)",
+                labels={"spo2": "Porcentaje (%)", "relative_time": "Tiempo (s)"},
             )
             graphs.append(dcc.Graph(figure=style_fig(fig_spo2)))
         return html.Div(graphs) if graphs else dbc.Alert(
-            "No HR or SpO₂ data available for this session.", color="warning"
+            "Esta sesión no contiene datos de FC ni SpO₂.", color="warning"
         )
 
     if selected_tab == "vtr_tab":
         if "vtr" not in window.columns:
-            return dbc.Alert("Translational velocity is not available in this file.", color="warning")
+            return dbc.Alert("Este archivo no incluye velocidad de traslación.", color="warning")
         if smooth_vtr:
             smoothed = window["vtr"].rolling(window=DEFAULT_VTR_SMOOTHING, center=True, min_periods=1).mean()
             fig = px.line(
                 window,
                 x="relative_time",
                 y=smoothed,
-                title="Translational velocity (smoothed)",
-                labels={"relative_time": "Time (s)", "value": "Velocity (m/s)"},
+                title="Velocidad de traslación (suavizada)",
+                labels={"relative_time": "Tiempo (s)", "value": "Velocidad (m/s)"},
             )
             fig.add_scatter(
                 x=window["relative_time"],
@@ -574,8 +537,8 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
                 window,
                 x="relative_time",
                 y="vtr",
-                title="Translational velocity (raw)",
-                labels={"relative_time": "Time (s)", "vtr": "Velocity (m/s)"},
+                title="Velocidad de traslación (sin suavizar)",
+                labels={"relative_time": "Tiempo (s)", "vtr": "Velocidad (m/s)"},
             )
         return dcc.Graph(figure=style_fig(fig))
 
@@ -583,24 +546,24 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
         exp_opts = experiment_options()
         if not exp_opts:
             return dbc.Alert(
-                "No experiments with gradient_boosting models were found in data/results/modeling/experiments/. "
-                "Run run_experiments.py first.",
+                "No se encontraron experimentos con gradient_boosting en data/results/modeling/experiments/. "
+                "Ejecuta run_experiments.py primero.",
                 color="warning",
             )
         default_exp = exp_opts[-1]["value"]
         return html.Div(
             [
                 html.P(
-                    "Run the trained model over the selected session to compare predicted and actual fatigue scores window by window.",
+                    "Ejecuta el modelo entrenado sobre la sesión seleccionada para comparar la predicción con el fatigue_score real ventana a ventana.",
                     className="mb-3",
                 ),
                 dbc.Row(
                     [
-                        dbc.Col(
-                            [
-                                html.Label("Select the experiment:"),
-                                dcc.Dropdown(
-                                    id="experiment-dropdown",
+                                dbc.Col(
+                                    [
+                                        html.Label("Selecciona el experimento:"),
+                                        dcc.Dropdown(
+                                            id="experiment-dropdown",
                                     options=exp_opts,
                                     value=default_exp,
                                     persistence=True,
@@ -609,9 +572,9 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
                             ],
                             md=6,
                         ),
-                        dbc.Col(
-                            [
-                                html.Label("Model:"),
+                                dbc.Col(
+                                    [
+                                        html.Label("Modelo:"),
                                 dcc.Input(
                                     id="model-name-input",
                                     type="text",
@@ -622,13 +585,13 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
                             ],
                             md=3,
                         ),
-                        dbc.Col(
-                            [
-                                html.Label("Actions:"),
-                                dbc.Button(
-                                    "Calculate Predictions",
-                                    id="run-inference-btn",
-                                    color="primary",
+                                dbc.Col(
+                                    [
+                                        html.Label("Acciones:"),
+                                        dbc.Button(
+                                            "Calcular predicciones",
+                                            id="run-inference-btn",
+                                            color="primary",
                                     className="w-100",
                                 ),
                             ],
@@ -650,7 +613,7 @@ def render_tab(selected_path: Optional[str], selected_time: List[float], selecte
             className="p-2",
         )
 
-    return dbc.Alert("Tab not recognised.", color="danger")
+    return dbc.Alert("Pestaña no reconocida.", color="danger")
 
 @app.callback(
     Output("inference-status", "children"),
@@ -665,36 +628,34 @@ def run_inference_view(n_clicks: Optional[int], session_path: Optional[str], exp
     if not n_clicks:
         raise PreventUpdate
     if not session_path:
-        return dbc.Alert("Select a session first.", color="warning"), empty_figure("Sin datos"), empty_figure("Sin datos")
+        return dbc.Alert("Selecciona una sesión primero.", color="warning"), empty_figure("Sin datos"), empty_figure("Sin datos")
     if not experiment_path:
-        return dbc.Alert("Select an experiment directory.", color="warning"), empty_figure("Sin datos"), empty_figure("Sin datos")
+        return dbc.Alert("Selecciona un directorio de experimento.", color="warning"), empty_figure("Sin datos"), empty_figure("Sin datos")
 
     try:
         df_pred, metrics = compute_window_predictions(session_path, experiment_path, model_name=DEFAULT_MODEL_NAME)
     except Exception as exc:
-        logger.exception("Inference failed.")
-        msg = dbc.Alert(f"Error during inference: {exc}", color="danger")
+        logger.exception("La inferencia falló.")
+        msg = dbc.Alert(f"Error durante la inferencia: {exc}", color="danger")
         return msg, empty_figure("Error"), empty_figure("Error")
 
     status_parts = [
-        html.Div(f"Experiment: {Path(experiment_path).name}"),
-        html.Div(f"Windows: {len(df_pred)}"),
+        html.Div(f"Experimento: {Path(experiment_path).name}"),
+        html.Div(f"Ventanas: {len(df_pred)}"),
     ]
     if metrics:
         status_parts.append(
             html.Div(f"MAE={metrics['MAE']:.3f} | RMSE={metrics['RMSE']:.3f} | R²={metrics['R2']:.3f}")
         )
     else:
-        status_parts.append(html.Div("The session does not include a fatigue_score; showing predictions only."))
+        status_parts.append(html.Div("La sesión no incluye fatigue_score; se muestran sólo las predicciones."))
     status = dbc.Alert(status_parts, color="info")
     return status, style_inference_line(df_pred), style_inference_scatter(df_pred)
 
-# ===========================
-# LAUNCHER
-# ===========================
+# FUNCIONES DE LANZAMIENTO
 def launch_dashboard(debug: bool = False):
-    """Start the Dash application."""
-    logger.info("Dashboard available at http://127.0.0.1:8050/")
+    """Lanza la aplicación de Dash."""
+    logger.info("Panel disponible en http://127.0.0.1:8050/")
     app.run(debug=debug)
 
 if __name__ == "__main__":

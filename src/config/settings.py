@@ -64,10 +64,10 @@ class FatigueWeights:
 
     def __post_init__(self) -> None:
         default_weights = {
-            "jerk": _get_float("RFP_FATIGUE_WEIGHT_JERK", 0.459),
-            "acc": _get_float("RFP_FATIGUE_WEIGHT_ACC", 0.199),
-            "hr": _get_float("RFP_FATIGUE_WEIGHT_FC", 0.266),
-            "spo2": _get_float("RFP_FATIGUE_WEIGHT_SPO2", 0.076),
+            "jerk": _get_float("RFP_FATIGUE_WEIGHT_JERK", 0.5745),
+            "acc": _get_float("RFP_FATIGUE_WEIGHT_ACC", 0.1242),
+            "hr": _get_float("RFP_FATIGUE_WEIGHT_FC", 0.2329),
+            "spo2": _get_float("RFP_FATIGUE_WEIGHT_SPO2", 0.0684),
         }
         object.__setattr__(self, "weights", default_weights)
 

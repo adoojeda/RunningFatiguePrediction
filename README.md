@@ -1,61 +1,61 @@
-# Running Fatigue Prediction Pipeline
+# Pipeline de Predicción de cansancio en Running
 
-This repository processes wearable running signals into modelling- and analysis-ready datasets.
+Este repositorio procesa señales capturadas por relojes inteligentes para generar conjuntos de datos listos para modelado y análisis.
 
-## End-to-end flow
+## Flujo extremo a extremo
 
-1. **Preprocessing** – `python src/data/preprocess.py`
-   - input: `data/raw/*.csv`
-   - output: `data/processed/clean_*.parquet`
-   - cleans timestamps, interpolates HR/SpO₂, removes obvious outliers
-   - optional flags: `--input-dir` and `--output-dir` allow working with alternate folders
-   - **Raw CSV column map**
+1. **Preprocesado** – `python src/data/preprocess.py`
+   - entrada: `data/raw/*.csv`
+   - salida: `data/processed/clean_*.parquet`
+   - limpia marcas temporales, interpola FC/SpO₂ y elimina outliers evidentes
+   - banderas opcionales `--input-dir` y `--output-dir` permiten trabajar con otras carpetas
+   - **Mapa de columnas del CSV bruto**
 
-     | Position | Description            | Assigned name |
-     |---------:|------------------------|---------------|
-     | 1        | Absolute timestamp     | `time`        |
-     | 2        | Acceleration X         | `acc_x`       |
-     | 3        | Acceleration Y         | `acc_y`       |
-     | 4        | Acceleration Z         | `acc_z`       |
-     | 5        | Gravity X              | `grav_x`      |
-     | 6        | Gravity Y              | `grav_y`      |
-     | 7        | Gravity Z              | `grav_z`      |
-     | 8        | Rotation X             | `rot_x`       |
-     | 9        | Rotation Y             | `rot_y`       |
-     | 10       | Rotation Z             | `rot_z`       |
-     | 11       | Roll                   | `roll`        |
-     | 12       | Pitch                  | `pitch`       |
-     | 13       | Yaw                    | `yaw`         |
-     | 14       | Heart rate             | `hr`          |
-     | 15       | Oxygen saturation      | `spo2`        |
+     | Posición | Descripción            | Nombre asignado |
+     |---------:|------------------------|-----------------|
+     | 1        | Marca temporal absoluta| `time`          |
+     | 2        | Aceleración X          | `acc_x`         |
+     | 3        | Aceleración Y          | `acc_y`         |
+     | 4        | Aceleración Z          | `acc_z`         |
+     | 5        | Gravedad X             | `grav_x`        |
+     | 6        | Gravedad Y             | `grav_y`        |
+     | 7        | Gravedad Z             | `grav_z`        |
+     | 8        | Rotación X             | `rot_x`         |
+     | 9        | Rotación Y             | `rot_y`         |
+     | 10       | Rotación Z             | `rot_z`         |
+     | 11       | Roll                   | `roll`          |
+     | 12       | Pitch                  | `pitch`         |
+     | 13       | Yaw                    | `yaw`           |
+     | 14       | Frecuencia cardíaca    | `hr`            |
+     | 15       | Saturación de oxígeno  | `spo2`          |
 
-2. **Kinematic enrichment** – `python src/features/kinematics.py`
-   - input: `data/processed/clean_*.parquet`
-   - output: `data/enriched/enriched_*.parquet`
-   - centres accelerations and computes raw/dynamic magnitudes
+2. **Enriquecimiento cinemático** – `python src/features/kinematics.py`
+   - entrada: `data/processed/clean_*.parquet`
+   - salida: `data/enriched/enriched_*.parquet`
+   - centra aceleraciones y calcula magnitudes dinámicas
 
-3. **Session metrics** – `python src/data/metrics.py`
-   - input: `data/enriched/enriched_*.parquet`
-   - output: `data/results/all_sessions_metrics.parquet`
-   - derives translational velocity, jerk and fatigue scores
+3. **Métricas por sesión** – `python src/data/metrics.py`
+   - entrada: `data/enriched/enriched_*.parquet`
+   - salida: `data/results/all_sessions_metrics.parquet`
+   - deriva velocidad traslacional, jerk y los componentes del índice de fatiga
 
-4. **Feature extraction** – `python src/features/features_extraction.py`
-   - input: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
-   - output: `data/results/features_dataset.parquet`
-   - builds sliding-window features (3 s, 75% overlap) aligned with reported RPE/fatigue targets
+4. **Extracción de características** – `python src/features/features_extraction.py`
+   - entrada: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
+   - salida: `data/results/features_dataset.parquet`
+   - construye ventanas deslizantes de 3 s (50 % de solape) alineadas con los objetivos de fatiga/RPE
 
-5. **Analysis & dashboards** – scripts in `src/analysis/` and `src/app/`
-   - generate EDA figures (`eda_features.py`) and interactive views (`dashboard.py`)
+5. **Análisis y dashboards** – scripts en `src/analysis/` y `src/app/`
+   - generan figuras de EDA (`eda_features.py`) y vistas interactivas (`dashboard.py`)
 
-## Feature set used for modeling
+## Conjunto de características utilizado en el modelado
 
-After auditing coverage, variance and redundancy, the modeling stage consumes a curated list of window-level features, including physiology (`hr_mean`, `spo2_mean`, `fatigue_score`), accelerations per axis (`acc_*centered_*`), magnitudes (`acc_*`), translational velocity (`vtr_*`), jerk (`jerk_*`), and orientation/balance (`roll_*`, `yaw_*`, `grav_*`). The whitelist lives in the modeling scripts (e.g., `src/models/run_experiments.py`) and is applied before training for reproducibility.
+Tras auditar cobertura, varianza y redundancia, la etapa de modelado consume una lista curada de atributos por ventana: fisiología (`hr_mean`, `spo2_mean`, `fatigue_score`), aceleraciones por eje centradas (`acc_*centered_*`), magnitudes (`acc_*`), velocidad traslacional (`vtr_*`), jerk (`jerk_*`) y orientación/balance (`roll_*`, `yaw_*`, `grav_*`). La whitelist vive en los scripts de modelado (p. ej., `src/models/run_experiments.py`) y se aplica antes del entrenamiento para garantizar reproducibilidad.
 
-## Modeling workflows
+## Flujo de modelado
 
-- **Experiments**: `python src/models/run_experiments.py --dataset data/results/features_dataset.parquet --target fatigue_score --group runner_id --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost --save-predictions --save-models (--fast-grid optional)`
-  - runs grouped experiments (runner_id by default), executes GridSearchCV for each selected model and persists metrics, predictions, hashes and serialized models under `data/results/modeling/experiments/`.
+- **Experimentos**: `python src/models/run_experiments.py --dataset data/results/features_dataset.parquet --target fatigue_score --group runner_id --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost --save-predictions --save-models [--fast-grid opcional]`
+  - ejecuta experimentos agrupados por corredor, lanza GridSearchCV para cada modelo y guarda métricas, predicciones, hashes y modelos serializados en `data/results/modeling/experiments/`.
 
-## Inference workflow
+## Flujo de inferencia
 
-Use `src/models/run_inference.py` (also exposed in `notebooks/inference_demo.ipynb` and via the dashboard tab) to replay a trained pipeline over any `enriched_*.parquet` session and stream the predictions. This produces per-window predictions identical to those seen during evaluation and is also used by the Dash dashboard (`Fatigue Inference` tab) to visualise the model online.
+`src/models/run_inference.py` (también disponible en `notebooks/inference_demo.ipynb` y en la pestaña del dashboard) permite reproducir un pipeline entrenado sobre cualquier `enriched_*.parquet` y emitir las predicciones por ventana. El resultado es idéntico al evaluado durante el entrenamiento y alimenta la pestaña de “Inferencia de fatiga” del panel Dash para visualizar el estado en tiempo (casi) real.

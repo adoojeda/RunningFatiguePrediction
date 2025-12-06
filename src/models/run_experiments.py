@@ -1,20 +1,18 @@
 """
-Experiment runner for fatigue/RPE modeling.
+Executor de experimentos para el modelado de cansancio/RPE.
 
-Responsibilities:
-    * Load the curated feature dataset (3 s windows).
-    * Apply the feature whitelist.
-    * Train/evaluate multiple models (GBDT, RF, HistGB, ElasticNet, optional XGBoost/LightGBM/CatBoost).
-    * Perform hyperparameter search with GroupKFold (via GridSearchCV).
-    * Persist metrics, predictions, and serialized models under data/results/modeling/experiments/.
+Responsabilidades:
+    * Cargar el dataset curado de características (ventanas de 3 s).
+    * Aplicar la whitelist de variables.
+    * Entrenar/evaluar múltiples modelos (GBDT, RF, HistGB, ElasticNet, opcional XGBoost/CatBoost).
+    * Realizar búsqueda de hiperparámetros con GroupKFold (GridSearchCV).
+    * Guardar métricas, predicciones y modelos en data/results/modeling/experiments/.
 
-Usage:
+Uso:
     python src/models/run_experiments.py \
         --dataset data/results/features_dataset.parquet \
         --group runner_id \
-        --output-dir data/results/modeling/experiments \
-        --save-predictions \
-        --save-models
+        --output-dir data/results/modeling/experiments
 """
 
 from __future__ import annotations
@@ -53,31 +51,27 @@ try:
 except ImportError:  
     CatBoostRegressor = None
 
-# =====================
-# LOGGING CONFIGURATION
-# =====================
+# CONFIGURACIÓN DEL LOGGING
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# ===============================
-# PATH DEFINITIONS AND WHITELISTS
-# ===============================
+# RUTAS Y WHITELIST DE FEATURES
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = PROJECT_ROOT / "data" / "results" / "features_dataset.parquet"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "results" / "modeling" / "experiments"
 FEATURE_WHITELIST = [
-    # Heart/oxygen
+    # Frecuencia cardíaca y SpO2
     "hr_mean", "spo2_mean",
-    # Accelerations
+    # Aceleraciones
     "acc_mean", "acc_std", "acc_mag_mad", "acc_mag_skew", "acc_mag_kurt",
     "acc_x_centered_mean", "acc_x_centered_std", "acc_x_centered_mad", "acc_x_centered_skew", "acc_x_centered_kurt",
     "acc_y_centered_mean", "acc_y_centered_std", "acc_y_centered_mad", "acc_y_centered_skew", "acc_y_centered_kurt",
     "acc_z_centered_mean", "acc_z_centered_std", "acc_z_centered_mad", "acc_z_centered_skew", "acc_z_centered_kurt",
-    # Velocity
+    # Velocidades
     "vtr_mean", "vtr_std", "vtr_mad", "vtr_skew", "vtr_kurt",
     # Jerk
     "jerk_mean", "jerk_std", "jerk_mad", "jerk_skew",
-    # Orientation / balance
+    # Orientación
     "roll_mean", "roll_std", "roll_mad", "roll_skew", "roll_kurt",
     "yaw_mean", "yaw_std", "yaw_mad", "yaw_skew", "yaw_kurt",
     "grav_x_mean", "grav_x_std", "grav_x_mad", "grav_x_skew", "grav_x_kurt",
@@ -89,15 +83,13 @@ META_COLS = {"file","source_file","runner_id","session_id","age","start_s","dura
 TARGET_SIBLINGS = {"reported_rpe", "fatigue_level"}
 TARGET_LEAKAGE_MAP = {"fatigue_score": [],"fatigue_level": ["fatigue_score"]}
 
-# ==============================
-# GROUPING AND CONFIG STRUCTURES
-# ==============================
+# AGRUPACIÓN Y CONFIGURACIÓN DE EXPERIMENTOS
 def build_group_series(df: pd.DataFrame, spec: str) -> pd.Series:
-    """Create grouping labels from a spec (single column or '+' separated combination)."""
+    """Construye etiquetas de agrupación a partir de la especificación (columna o combinación con '+')."""
     columns = spec.split("+")
     missing = [col for col in columns if col not in df.columns]
     if missing:
-        raise KeyError(f"Grouping columns not found in dataset: {missing}")
+        raise KeyError(f"Columnas de agrupación no encontradas en el dataset: {missing}")
     series = df[columns[0]].astype(str)
     for col in columns[1:]:
         series = series + "__" + df[col].astype(str)
@@ -130,41 +122,37 @@ class FoldResult:
     max_err: float
     samples: int
 
-# ======================
-# COMMAND-LINE INTERFACE
-# ======================
+# INTERFAZ DE LÍNEA DE COMANDOS
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Experiment runner for fatigue modeling.")
-    parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="Path to the feature parquet.")
-    parser.add_argument("--target", type=str, default="fatigue_score", help="Target column name.")
-    parser.add_argument("--group", type=str, default="runner_id", help="Grouping column for splits.")
-    parser.add_argument("--test-size", type=float, default=0.2, help="Test split proportion.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+    parser = argparse.ArgumentParser(description="Executor de experimentos para el modelado de fatiga.")
+    parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="Ruta al parquet de características.")
+    parser.add_argument("--target", type=str, default="fatigue_score", help="Nombre de la columna objetivo.")
+    parser.add_argument("--group", type=str, default="runner_id", help="Columna de agrupación para los splits.")
+    parser.add_argument("--test-size", type=float, default=0.2, help="Proporción del conjunto de test.")
+    parser.add_argument("--seed", type=int, default=42, help="Semilla aleatoria para reproducibilidad.")
     parser.add_argument(
         "--models",
         nargs="+",
         default=["gradient_boosting", "random_forest", "hist_gradient_boosting", "elasticnet", "xgboost", "catboost"],
         help=(
-            "Model types to train (options: gradient_boosting, random_forest, hist_gradient_boosting, "
+            "Modelos a entrenar (disponibles: gradient_boosting, random_forest, hist_gradient_boosting, "
             "elasticnet, xgboost, catboost)."
         ),
     )
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Results output directory.")
-    parser.add_argument("--save-predictions", action="store_true", help="Save test set predictions.")
-    parser.add_argument("--save-models", action="store_true", help="Save trained models.")
-    parser.add_argument("--no-whitelist", action="store_true", help="Do not use feature whitelist; use all numeric features.")
-    parser.add_argument("--n-jobs", type=int, default=-1, help="Parallelism for GridSearchCV/model training.")
-    parser.add_argument("--fast-grid", action="store_true", help="Use a reduced hyperparameter grid for faster runs.")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directorio de salida para resultados.")
+    parser.add_argument("--no-save-predictions", action="store_true", help="No guardar las predicciones del test.")
+    parser.add_argument("--no-save-models", action="store_true", help="No guardar los modelos entrenados.")
+    parser.add_argument("--no-whitelist", action="store_true", help="No usar whitelist; emplear todas las columnas numéricas.")
+    parser.add_argument("--n-jobs", type=int, default=-1, help="Paralelismo para GridSearchCV/entrenamiento.")
+    parser.add_argument("--fast-grid", action="store_true", help="Usar una parrilla reducida para acelerar las pruebas.")
     return parser.parse_args()
 
-# ======================
-# DATA LOADING & CLEANING
-# ======================
+# CARGA Y LIMPIEZA DE DATOS
 def load_dataset(path: Path) -> pd.DataFrame:
     if not path.exists():
-        raise FileNotFoundError(f"Dataset file not found: {path}")
+        raise FileNotFoundError(f"No se encontró el dataset: {path}")
     df = pd.read_parquet(path)
-    logger.info("Dataset loaded from %s with %d rows and %d columns.", path, df.shape[0], df.shape[1])
+    logger.info("Dataset cargado desde %s con %d filas y %d columnas.", path, df.shape[0], df.shape[1])
     return df
 
 def compute_file_hash(path: Path, chunk_size: int = 1 << 20) -> str:
@@ -177,12 +165,10 @@ def compute_file_hash(path: Path, chunk_size: int = 1 << 20) -> str:
             md5.update(chunk)
     return md5.hexdigest()
 
-# ======================
-# FEATURE PREPARATION
-# ======================
+# PREPARACIÓN DE FEATURES
 def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tuple[pd.DataFrame, pd.Series]:
     if target not in df.columns:
-        raise KeyError(f"Target column '{target}' not present in dataset.")
+        raise KeyError(f"La columna objetivo '{target}' no está presente en el dataset.")
     df = df.copy()
     y = pd.to_numeric(df[target], errors="coerce")
     df.drop(columns=[target], inplace=True, errors="ignore")
@@ -197,28 +183,26 @@ def prepare_features(df: pd.DataFrame, target: str, use_whitelist: bool) -> Tupl
         available = [col for col in FEATURE_WHITELIST if col in df.columns]
         missing = [col for col in FEATURE_WHITELIST if col not in df.columns]
         if missing:
-            logger.warning("Missing whitelist columns: %s", missing)
+            logger.warning("Columnas de la whitelist ausentes: %s", missing)
         if available:
             df = df[available]
         else:
-            logger.warning("Whitelist columns missing; falling back to all numeric columns.")
+            logger.warning("No hay columnas de la whitelist; se usarán todas las columnas numéricas.")
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not numeric_cols:
-        raise ValueError("No numeric columns remain after filtering.")
+        raise ValueError("No quedan columnas numéricas tras el filtrado.")
     X = df[numeric_cols]
     mask = np.isfinite(y)
     X, y = X.loc[mask], y.loc[mask]
     return X, y
 
-# ========================
-# DATA SPLITTING UTILITIES
-# ========================
+# UTILIDADES DE PARTICIÓN
 def split_data(X, y, groups, *, test_size: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
     splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
     train_idx, test_idx = next(splitter.split(X, y, groups))
     logger.info(
-        "Data split: %d train samples (%d groups), %d test samples (%d groups).",
+        "Partición: %d muestras de entrenamiento (%d grupos), %d muestras de test (%d grupos).",
         len(train_idx),
         groups.iloc[train_idx].nunique(),
         len(test_idx),
@@ -253,9 +237,7 @@ def make_numeric_pipeline(model) -> Pipeline:
         ]
     )
 
-# ========================
-# MODEL + GRID DEFINITIONS
-# ========================
+# DEFINICIÓN DE MODELOS Y PARÁMETROS
 def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
     n_jobs = 1 if n_jobs == 0 else n_jobs
     if name == "gradient_boosting":
@@ -302,7 +284,7 @@ def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
         )
     elif name == "xgboost":
         if XGBRegressor is None:
-            raise ImportError("xgboost is not installed.")
+            raise ImportError("xgboost no está instalado.")
         model = XGBRegressor(
             random_state=seed,
             n_estimators=400,
@@ -316,7 +298,7 @@ def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
         )
     elif name == "catboost":
         if CatBoostRegressor is None:
-            raise ImportError("catboost is not installed.")
+            raise ImportError("catboost no está instalado.")
         model = CatBoostRegressor(
             random_state=seed,
             verbose=False,
@@ -332,13 +314,11 @@ def build_model_grid(name: str, seed: int, n_jobs: int, fast_grid: bool):
     pipeline = make_numeric_pipeline(model)
     return pipeline, param_grid
 
-# ===========================
-# CORE EXPERIMENT EXECUTION
-# ===========================
+# EJECUCIÓN PRINCIPAL DEL EXPERIMENTO
 def run_experiment(cfg: ExperimentConfig) -> None:
     df = load_dataset(cfg.dataset)
     dataset_hash = compute_file_hash(cfg.dataset)
-    logger.info("Running experiment with grouping spec '%s'", cfg.group)
+    logger.info("Ejecutando experimento con la especificación de agrupación '%s'", cfg.group)
     groups = build_group_series(df, cfg.group).astype(str)
     X, y = prepare_features(df, cfg.target, cfg.whitelist)
     if len(X) != len(groups):
@@ -362,7 +342,7 @@ def run_experiment(cfg: ExperimentConfig) -> None:
     predictions_store: Dict[str, pd.DataFrame] = {}
 
     for model_name in cfg.models:
-        logger.info("=== Model %s ===", model_name)
+        logger.info("=== Modelo %s ===", model_name)
         pipeline, param_grid = build_model_grid(model_name, cfg.seed, cfg.n_jobs, cfg.fast_grid)
         gkf = GroupKFold(n_splits=min(5, groups_train.nunique()))
         search = GridSearchCV(
@@ -374,7 +354,7 @@ def run_experiment(cfg: ExperimentConfig) -> None:
             verbose=1,
         )
         search.fit(X_train, y_train, groups=groups_train)
-        logger.info("%s -> best hyperparameters: %s", model_name, search.best_params_)
+        logger.info("%s -> mejores hiperparámetros: %s", model_name, search.best_params_)
 
         for fold, (train_idx_cv, val_idx_cv) in enumerate(gkf.split(X_train, y_train, groups_train), start=1):
             pipeline_best = search.best_estimator_
@@ -384,7 +364,6 @@ def run_experiment(cfg: ExperimentConfig) -> None:
                 evaluate(y_train.iloc[val_idx_cv], val_pred, model_name=model_name, split="cv", fold=fold)
             )
 
-        # Test metrics
         best_pipeline = search.best_estimator_
         best_pipeline.fit(X_train, y_train)
         test_pred = best_pipeline.predict(X_test)
@@ -406,12 +385,12 @@ def run_experiment(cfg: ExperimentConfig) -> None:
         if cfg.save_models:
             model_path = exp_dir / f"{model_name}_best.joblib"
             joblib.dump(best_pipeline, model_path)
-            logger.info("Model saved to %s", model_path)
+            logger.info("Modelo guardado en %s", model_path)
 
     results_df = pd.DataFrame([asdict(res) for res in all_results])
     results_path = exp_dir / "metrics.csv"
     results_df.to_csv(results_path, index=False)
-    logger.info("Metrics saved to %s", results_path)
+    logger.info("Métricas guardadas en %s", results_path)
 
     summary = (
         results_df.groupby(["model", "split"])
@@ -432,7 +411,7 @@ def run_experiment(cfg: ExperimentConfig) -> None:
     )
     summary_path = exp_dir / "summary.csv"
     summary.to_csv(summary_path, index=False)
-    logger.info("Summary saved to %s", summary_path)
+    logger.info("Resumen guardado en %s", summary_path)
 
     cfg_payload = asdict(cfg)
     cfg_payload["models"] = cfg.models
@@ -448,11 +427,9 @@ def run_experiment(cfg: ExperimentConfig) -> None:
         pred_concat = pd.concat(predictions_store.values(), ignore_index=True)
         pred_path = exp_dir / "predictions.parquet"
         pred_concat.to_parquet(pred_path, index=False)
-        logger.info("Predictions saved to %s", pred_path)
+        logger.info("Predicciones guardadas en %s", pred_path)
 
-# ===================
-# MAIN ENTRY POINT
-# ===================
+# EJECUCIÓN PRINCIPAL
 def main() -> None:
     args = parse_args()
     cfg = ExperimentConfig(
@@ -463,8 +440,8 @@ def main() -> None:
         seed=args.seed,
         output_dir=args.output_dir,
         models=args.models,
-        save_predictions=args.save_predictions,
-        save_models=args.save_models,
+        save_predictions=not args.no_save_predictions,
+        save_models=not args.no_save_models,
         whitelist=not args.no_whitelist,
         n_jobs=args.n_jobs,
         fast_grid=args.fast_grid,
