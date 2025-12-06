@@ -295,6 +295,13 @@ def run_feature_extraction(
         raise RuntimeError("No se generaron características. Revisa columnas requeridas y rangos temporales.")
 
     df_feats = pd.DataFrame(all_feats)
+    if "jerk_std" in df_feats.columns:
+        threshold = df_feats["jerk_std"].quantile(0.995)
+        before = len(df_feats)
+        df_feats = df_feats[df_feats["jerk_std"] <= threshold]
+        removed = before - len(df_feats)
+        if removed > 0:
+            logger.info("Filtradas %d ventanas con jerk_std > %.2f", removed, threshold)
     df_out = df_feats.merge(df_map, on="file", how="left")
 
     missing_rpe = df_out["reported_rpe"].isna().sum() if "reported_rpe" in df_out.columns else len(df_out)
