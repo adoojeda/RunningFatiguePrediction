@@ -1,7 +1,8 @@
 """
-Funciones auxiliares para métricas biomecánicas/fisiológicas y cálculo de fatiga.
+Helper functions for biomechanical/physiological metrics and fatigue scoring.
 """
 
+# STANDARD LIBRARIES
 from __future__ import annotations
 
 from typing import Dict, Optional
@@ -9,14 +10,17 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
+# PROJECT IMPORTS
 from src.config import get_config
 
+# CONFIGURATION
 CFG = get_config()
 WEIGHTS = dict(CFG.fatigue_weights.weights)
 DEFAULT_FATIGUE_REFERENCES: Dict[str, float] = dict(CFG.fatigue_refs.references)
 
+# METRICS COMPUTATION
 def compute_session_metrics(df: pd.DataFrame) -> Dict[str, float]:
-    """Calcula estadísticas descriptivas de las señales biomecánicas y fisiológicas."""
+    """Computes descriptive statistics from biomechanical and physiological signals."""
     metrics: Dict[str, float] = {}
     if df is None or df.empty:
         return metrics
@@ -40,19 +44,21 @@ def compute_session_metrics(df: pd.DataFrame) -> Dict[str, float]:
     return metrics
 
 def _safe_percentile(series: pd.Series, q: float) -> float:
+    """ Computes a percentile safely, returning NaN if no valid data."""
     values = pd.to_numeric(series, errors="coerce")
     if values.notna().sum() == 0:
         return np.nan
     return float(np.nanpercentile(values.to_numpy(dtype=float), q))
 
 def _safe_std(series: pd.Series) -> float:
+    """ Computes standard deviation safely, returning NaN if insufficient data."""
     values = pd.to_numeric(series, errors="coerce")
     if values.notna().sum() < 2:
         return np.nan
     return float(np.nanstd(values.to_numpy(dtype=float), ddof=1))
 
 def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
-    """Estima las referencias de normalización de fatiga a partir de una sesión."""
+    """Estimates fatigue normalisation references based on a session."""
     refs = DEFAULT_FATIGUE_REFERENCES.copy()
 
     if "hr" in df.columns:
@@ -77,6 +83,7 @@ def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
 
     return refs
 
+# FATIGUE SCORE COMPUTATION
 def compute_fatigue_score(
     metrics: Dict[str, float],
     *,
@@ -85,12 +92,12 @@ def compute_fatigue_score(
     weights: Optional[Dict[str, float]] = None,
     adaptive: bool = True,
 ) -> Dict[str, float]:
-    """Calcula el índice de fatiga combinado con pesos y referencias configurables."""
+    """Computes the combined fatigue index with configurable weights and references."""
     if not metrics:
         return {"fatigue_score": np.nan}
 
     if context not in {"session", "window"}:
-        raise ValueError(f"Contexto inválido '{context}'. Se espera 'session' o 'window'.")
+        raise ValueError(f"Invalid context '{context}'. Expected 'session' or 'window'.")
 
     params = DEFAULT_FATIGUE_REFERENCES.copy()
     if references:

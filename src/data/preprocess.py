@@ -30,7 +30,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from src.config import get_config
-from src.utils.kinematics import DEFAULT_FS, estimate_sampling_rate
+from utils.kinematics_utils import DEFAULT_FS, estimate_sampling_rate
 from src.utils.preprocess_utils import (
     apply_physio_filters,
     derive_relative_time,

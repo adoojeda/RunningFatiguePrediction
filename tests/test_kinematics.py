@@ -1,16 +1,22 @@
+"""Tests for the kinematics processing module."""
+
+# STANDARD LIBRARIES
 from pathlib import Path
 import sys
 
 import pandas as pd
 import pytest
 
+# PROJECT IMPORTS
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.features.kinematics import list_processed_files, process_single_file
 
+# TESTS
 def test_list_processed_files(tmp_path):
+    """Only clean_*.parquet files should be returned."""
     clean_dir = tmp_path / "processed"
     clean_dir.mkdir()
     (clean_dir / "clean_a.parquet").write_text("")
@@ -22,6 +28,7 @@ def test_list_processed_files(tmp_path):
     assert files[0].endswith("clean_a.parquet")
 
 def test_process_single_file_generates_enriched(tmp_path):
+    """Processing a clean file should produce its enriched counterpart."""
     processed_file = tmp_path / "clean_demo.parquet"
     output_dir = tmp_path / "enriched"
     output_dir.mkdir()
