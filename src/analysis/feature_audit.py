@@ -1,21 +1,24 @@
 """
-Auditoría de `features_dataset_3s_50olap.parquet`.
+Feature audit for `results/features_dataset.parquet`.
 
-Genera:
-    1) resumen de cobertura/varianza por columna (CSV),
-    2) lista de pares de características altamente correlacionados,
-    3) importancias rápidas de RandomForest como proxy de utilidad.
+Example:
+    python src/analysis/feature_audit.py --dataset data/results/features_dataset.parquet --target fatigue_score
+
+Generates:
+    1) per-column coverage/variance summary (CSV),
+    2) list of highly correlated feature pairs,
+    3) quick RandomForest importances as a utility proxy.
 """
 
+# STANDARD LIBRARIES
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -24,18 +27,19 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-# Añade la raíz del proyecto al sys.path
+# PROJECT SETUP
 BASE_DIR = Path(__file__).resolve().parents[2]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+# PROJECT IMPORTS
 from src.utils.data_loader import load_features_dataset
 
-# CONFIGURACIÓN DEL LOGGING
+# LOGGING CONFIGURATION
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# METADATOS Y TARGETS
+# METADATA AND TARGETS
 META_COLS = {
     "file",
     "source_file",
@@ -53,38 +57,39 @@ TARGET_LEAKAGE_MAP = {
     ],
 }
 
-# PARSEO DE ARGUMENTOS
+# DEFAULT DATASET PATH
 DEFAULT_DATASET = BASE_DIR / "data" / "results" / "features_dataset.parquet"
 
+# ARGPARSE SETUP
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Auditoría del dataset de ventanas deslizantes.")
+    parser = argparse.ArgumentParser(description="Sliding-window dataset audit.")
     parser.add_argument(
         "--dataset",
         type=str,
         default=str(DEFAULT_DATASET),
-        help="Ruta al parquet de ventanas (por defecto: features_dataset.parquet).",
+        help="Path to the features parquet (default: features_dataset.parquet).",
     )
     parser.add_argument(
         "--target",
-        type=str,
+        choices=["fatigue_score", "reported_rpe"],
         default="fatigue_score",
-        help="Columna objetivo para estimar importancia.",
+        help="Target column for importance estimation (fatigue_score or reported_rpe).",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
         default=str(BASE_DIR / "data" / "results" / "feature_audit"),
-        help="Directorio donde almacenar los artefactos del análisis.",
+        help="Directory to store audit artefacts.",
     )
     parser.add_argument(
         "--corr-threshold",
         type=float,
         default=0.95,
-        help="Umbral para reportar pares altamente correlacionados (por defecto 0.95).",
+        help="Threshold to flag high-correlation pairs (default 0.95).",
     )
     return parser.parse_args()
 
-# FUNCIONES DE AUDITORÍA
+# FEATURE AUDIT FUNCTIONS
 def compute_feature_summary(df: pd.DataFrame, target_cols: set[str], output_dir: Path) -> Path:
     summary = pd.DataFrame(
         {
@@ -106,13 +111,13 @@ def compute_feature_summary(df: pd.DataFrame, target_cols: set[str], output_dir:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / "feature_summary.csv"
     summary.sort_index().to_csv(path)
-    logger.info("Resumen de características guardado en %s", path)
+    logger.info("Feature summary stored at %s", path)
     return path
 
 def correlation_report(df: pd.DataFrame, threshold: float, target_cols: set[str], output_dir: Path) -> Path:
     numeric = df.select_dtypes(include=[np.number]).drop(columns=list(target_cols), errors="ignore")
     if numeric.empty:
-        raise ValueError("No hay columnas numéricas disponibles para analizar correlaciones.")
+        raise ValueError("No numeric columns available to analyse correlations.")
 
     corr = numeric.corr().replace([np.inf, -np.inf], np.nan)
     pairs: List[Tuple[str, str, float]] = []
@@ -128,12 +133,12 @@ def correlation_report(df: pd.DataFrame, threshold: float, target_cols: set[str]
     )
     path = output_dir / "high_correlation_pairs.csv"
     df_pairs.to_csv(path, index=False)
-    logger.info("Correlaciones altas (%d pares) guardadas en %s", len(df_pairs), path)
+    logger.info("Correlated pairs (%d) stored at %s", len(df_pairs), path)
     return path
 
 def feature_importance_report(df: pd.DataFrame, target: str, target_cols: set[str], output_dir: Path) -> Path:
     if target not in df.columns:
-        raise KeyError(f"La columna objetivo '{target}' no está presente en el dataset.")
+        raise KeyError(f"Target column '{target}' is not present in the dataset.")
 
     y = pd.to_numeric(df[target], errors="coerce")
     X = df.drop(columns=list(META_COLS | target_cols), errors="ignore")
@@ -166,26 +171,26 @@ def feature_importance_report(df: pd.DataFrame, target: str, target_cols: set[st
 
     path = output_dir / "feature_importance_rf.csv"
     df_imp.to_csv(path, index=False)
-    logger.info("Importancias (RandomForest) guardadas en %s", path)
+    logger.info("Importances (RandomForest) stored at %s", path)
     payload = [{"feature": feat, "importance": float(score)} for feat, score in ranking[:20]]
     json_path = output_dir / "feature_importance_top20.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     return path
 
-# MAIN EJECUCIÓN
+# MAIN EXECUTION
 def main() -> None:
     args = parse_args()
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
-        raise FileNotFoundError(f"No se encontró ningún dataset en {dataset_path}")
+        raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
 
     output_dir = Path(args.output_dir)
     df = load_features_dataset(str(dataset_path))
     if df is None or df.empty:
-        raise ValueError("No se pudo cargar el dataset o está vacío.")
+        raise ValueError("No data loaded from the dataset.")
 
-    logger.info("Auditoría iniciada sobre %d filas y %d columnas.", len(df), len(df.columns))
+    logger.info("Loaded dataset with %d rows and %d columns", len(df), len(df.columns))
 
     target_cols = TARGET_COLS_BASE | {args.target}
 
@@ -193,7 +198,7 @@ def main() -> None:
     correlation_report(df, threshold=args.corr_threshold, target_cols=target_cols, output_dir=output_dir)
     feature_importance_report(df, target=args.target, target_cols=target_cols, output_dir=output_dir)
 
-    logger.info("Auditoría completada. Revisa los artefactos en %s", output_dir)
+    logger.info("Feature audit completed successfully.")
 
 if __name__ == "__main__":
     main()

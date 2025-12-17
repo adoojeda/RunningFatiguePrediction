@@ -1,15 +1,21 @@
+"""Tests for features extraction module."""
+
+# STANDARD LIBRARIES
 from pathlib import Path
 import sys
 
 import pandas as pd
 import numpy as np
 
+# PROJECT SETUP
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# PROJECT IMPORTS
 from src.features.features_extraction import compute_window_features
 
+# TESTS
 def test_compute_window_features_includes_fatigue_score():
     df_win = pd.DataFrame(
         {

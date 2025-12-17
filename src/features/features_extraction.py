@@ -1,44 +1,49 @@
 """
-Extracción de características con ventanas deslizantes (etapa 4/5 del pipeline).
+Sliding-window feature extraction (stage 4/5 of the pipeline).
 
-- Genera ventanas solapadas (por defecto 3 s y 50 % de solape) sobre las sesiones enriquecidas.
-- Calcula estadísticas robustas de aceleración, velocidad de traslación, jerk, FC, SpO₂ e índice de fatiga.
-- Registra métricas de calidad por ventana (número de muestras, proporción de NaN, duración).
-- Cruza las características con el mapeo de RPE (metadata de corredor y sesión).
-- Guarda el dataset consolidado bajo `data/results/` (configurable por CLI).
+- Generates overlapping windows (3 s and 50 % overlap by default) over enriched sessions.
+- Computes robust statistics of acceleration, translational velocity, jerk, HR, SpO₂ and fatigue score.
+- Joins features with RPE runner/session metadata.
+- Stores the consolidated dataset under `data/results/`.
 
-Entrada: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
-Salida: `data/results/features_dataset.parquet`
-Siguiente etapa: scripts de análisis en `src/analysis/`.
+Example:
+    python src/features/features_extraction.py --window 3.0 --overlap 0.5 --output data/results/features_dataset.parquet
+
+Input:  `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
+Output: `data/results/features_dataset.parquet`
+Next:   scripts in `src/analysis/`.
 """
 
+# STANDARD LIBRARIES
 import argparse
 import logging
 import os
 import sys
-from typing import Dict, Iterator, List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
+# PROJECT ROOT SETUP
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# PROJECT LIBRARIES
 from src.config import get_config
 from src.utils.metrics_utils import compute_fatigue_score, derive_fatigue_references
 from src.utils.schemas import validate_dataframe
 from src.utils.window_stats import mad, skewness, kurtosis, safe_stats
-from src.utils.windowing import WindowParams, create_window_params, iter_windows, prepare_dataframe
+from src.utils.windowing import create_window_params, iter_windows, prepare_dataframe
 
-# CONFIGURACIÓN DEL LOGGING
+# LOGGER SETUP
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# RUTAS Y CONFIGURACIÓN
+# DIRECTORIES AND PATHS
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
@@ -51,6 +56,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 CFG = get_config()
 
+# RELEVANT COLUMNS
 NUMERIC_COLS = [
     "acc_x_centered",
     "acc_y_centered",
@@ -68,20 +74,16 @@ NUMERIC_COLS = [
     "yaw",
 ]
 
-# CÁLCULO DE CARACTERÍSTICAS POR VENTANA
+# COMPUTE FEATURES FOR A WINDOW
 def compute_window_features(
     df_win: pd.DataFrame,
     file_id: str,
     source_file: str,
     fatigue_refs: Optional[Dict[str, float]] = None,
 ) -> Dict:
-    """
-    Calcula estadísticas para una ventana ya segmentada (df_win).
-    Devuelve un diccionario con características y metadatos.
-    """
+    """Computes features for a given window DataFrame."""
     out: Dict[str, float] = {}
 
-    # Metadatos de la ventana
     t0 = float(df_win["relative_time"].min())
     t1 = float(df_win["relative_time"].max())
     duration = t1 - t0 if np.isfinite(t1) else np.nan
@@ -92,7 +94,6 @@ def compute_window_features(
     out["duration"] = max(duration, 0.0) if np.isfinite(duration) else np.nan
     out["n_samples"] = int(len(df_win))
 
-    # Aceleraciones centradas
     for axis in ["x", "y", "z"]:
         col = f"acc_{axis}_centered"
         if col in df_win.columns:
@@ -103,7 +104,6 @@ def compute_window_features(
             out[f"{col}_skew"] = skewness(x)
             out[f"{col}_kurt"] = kurtosis(x)
 
-    # Magnitud de la aceleración bruta
     if "acc_mag" in df_win.columns:
         x = df_win["acc_mag"].to_numpy(dtype=float)
         out["acc_mean"] = np.nanmean(x)
@@ -112,7 +112,6 @@ def compute_window_features(
         out["acc_mag_skew"] = skewness(x)
         out["acc_mag_kurt"] = kurtosis(x)
 
-    # Magnitud de la velocidad de traslación
     if "vtr" in df_win.columns:
         v = df_win["vtr"].to_numpy(dtype=float)
         out["vtr_mean"] = np.nanmean(v)
@@ -121,7 +120,6 @@ def compute_window_features(
         out["vtr_skew"] = skewness(v)
         out["vtr_kurt"] = kurtosis(v)
 
-    # Señales de orientación / balance
     for ori_col in ["roll", "yaw", "grav_x", "grav_y", "grav_z"]:
         if ori_col in df_win.columns:
             val = df_win[ori_col].to_numpy(dtype=float)
@@ -131,7 +129,6 @@ def compute_window_features(
             out[f"{ori_col}_skew"] = skewness(val)
             out[f"{ori_col}_kurt"] = kurtosis(val)
 
-    # Magnitud del jerk
     if "jerk_mag" in df_win.columns:
         j = df_win["jerk_mag"].to_numpy(dtype=float)
         out["jerk_mean"] = np.nanmean(j)
@@ -139,18 +136,16 @@ def compute_window_features(
         out["jerk_mad"] = mad(j)
         out["jerk_skew"] = skewness(j)
 
-    # Frecuencia cardiaca
     if "hr" in df_win.columns:
         f = df_win["hr"].to_numpy(dtype=float)
         mean, _, _ = safe_stats(f)
         out["hr_mean"] = mean
 
-    # Saturación de oxígeno (SpO₂)
     if "spo2" in df_win.columns:
         s = df_win["spo2"].to_numpy(dtype=float)
         mean, _, _ = safe_stats(s)
         out["spo2_mean"] = mean
-    # Calcula el fatigue_score por ventana a partir de las métricas disponibles
+    
     metrics_payload = {}
     hr_mean = out.get("hr_mean")
     if hr_mean is not None and np.isfinite(hr_mean):
@@ -177,31 +172,29 @@ def compute_window_features(
 
     return out
 
-# EXTRACCIÓN A NIVEL DE FICHERO
+# EXTRACT FEATURES FROM A FILE
 def extract_features_from_file(
     fpath: str,
     window: float,
     overlap: float,
     file_id: Optional[str] = None,
 ) -> List[Dict]:
-    """
-    Desliza ventanas sobre un fichero y calcula las características de cada una.
-    """
+    """Slides windows over a file and computes the features for each window."""
     try:
         df = pd.read_parquet(fpath)
     except Exception as exc:
-        logger.error("Error al leer %s: %s", os.path.basename(fpath), exc, exc_info=True)
+        logger.error("Error reading %s: %s", os.path.basename(fpath), exc, exc_info=True)
         return []
 
     schema_name = "enriched" if os.path.basename(fpath).startswith("enriched_") else "processed"
     try:
         validate_dataframe(df, schema_name)
     except ValueError as exc:
-        logger.error("La validación del esquema falló para %s: %s", os.path.basename(fpath), exc)
+        logger.error("Schema validation failed for %s: %s", os.path.basename(fpath), exc)
         return []
 
     if "relative_time" not in df.columns:
-        logger.warning("%s no contiene 'relative_time'; se omite.", os.path.basename(fpath))
+        logger.warning("%s does not contain 'relative_time'; skipped.", os.path.basename(fpath))
         return []
 
     df = prepare_dataframe(df, NUMERIC_COLS)
@@ -223,25 +216,26 @@ def extract_features_from_file(
                 )
             )
     except ValueError as exc:
-        logger.warning("%s tiene un rango temporal inválido; se omite. Motivo: %s", source_file, exc)
+        logger.warning("%s has an invalid time range; skipped. Reason: %s", source_file, exc)
 
     return feats
 
-# EJECUCIÓN DEL PIPELINE
+# LOAD RPE MAPPING
 def load_rpe_mapping(path: str) -> pd.DataFrame:
-    """Carga el fichero de mapeo de RPE con validaciones básicas."""
+    """Loads the RPE mapping file with basic validation."""
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"No se encontró el mapeo RPE en: {path}")
+        raise FileNotFoundError(f"RPE mapping not found at: {path}")
 
     df_map = pd.read_csv(path)
     expected_cols = {"file", "runner_id", "session_id", "reported_rpe"}
     missing = expected_cols - set(df_map.columns)
     if missing:
-        raise ValueError(f"Faltan columnas en rpe_file_mapping.csv: {missing}")
+        raise ValueError(f"RPE mapping is missing columns: {missing}")
     return df_map
 
+# COLLECT SOURCE FILES
 def collect_source_files(source_dir: Optional[str] = None) -> List[str]:
-    """Devuelve la lista de parquets a procesar, priorizando data/enriched."""
+    """Returns the list of parquet files to process, giving priority to data/enriched."""
     if source_dir:
         directories = [source_dir]
     else:
@@ -257,24 +251,23 @@ def collect_source_files(source_dir: Optional[str] = None) -> List[str]:
             if f.is_file() and f.name.endswith(".parquet") and (f.name.startswith("enriched_") or f.name.startswith("clean_"))
         )
         if files:
-            logger.info("Se encontraron %d ficheros en %s", len(files), directory)
+            logger.info("%d files found in %s", len(files), directory)
             return files
 
-    raise FileNotFoundError("No se encontraron parquets en los directorios configurados.")
+    raise FileNotFoundError("No parquet files were found in the configured directories.")
 
+# RUN FEATURE EXTRACTION PIPELINE
 def run_feature_extraction(
     window: float,
     overlap: float,
     out_path: str,
     source_dir: Optional[str] = None,
 ) -> str:
-    """
-    Ejecuta el pipeline completo de extracción de características.
-    """
+    """Runs the full sliding-window feature extraction pipeline."""
     df_map = load_rpe_mapping(MAPPING_PATH)
     files = collect_source_files(source_dir=source_dir)
 
-    logger.info("Procesando %d ficheros con ventana=%.2fs solape=%.2f", len(files), window, overlap)
+    logger.info("Processing %d files with window=%.2fs overlap=%.2f", len(files), window, overlap)
     all_feats: List[Dict] = []
 
     for fpath in files:
@@ -289,10 +282,10 @@ def run_feature_extraction(
         if feats:
             all_feats.extend(feats)
         else:
-            logger.warning("No se generaron características para %s", os.path.basename(fpath))
+            logger.warning("No features were generated for %s", os.path.basename(fpath))
 
     if not all_feats:
-        raise RuntimeError("No se generaron características. Revisa columnas requeridas y rangos temporales.")
+        raise RuntimeError("No features were generated. Check required columns and time ranges.")
 
     df_feats = pd.DataFrame(all_feats)
     if "jerk_std" in df_feats.columns:
@@ -301,12 +294,12 @@ def run_feature_extraction(
         df_feats = df_feats[df_feats["jerk_std"] <= threshold]
         removed = before - len(df_feats)
         if removed > 0:
-            logger.info("Filtradas %d ventanas con jerk_std > %.2f", removed, threshold)
+            logger.info("Filtered %d windows with jerk_std > %.2f", removed, threshold)
     df_out = df_feats.merge(df_map, on="file", how="left")
 
     missing_rpe = df_out["reported_rpe"].isna().sum() if "reported_rpe" in df_out.columns else len(df_out)
     if missing_rpe:
-        logger.warning("Falta información de mapeo para %d ventanas; revisa rpe_file_mapping.csv.", missing_rpe)
+        logger.warning("Mapping information missing for %d windows; check rpe_file_mapping.csv.", missing_rpe)
 
     if "reported_rpe" in df_out.columns:
         df_out["fatigue_level"] = pd.cut(
@@ -328,35 +321,36 @@ def run_feature_extraction(
     else:
         df_out.to_parquet(out_path, index=False)
 
-    logger.info("Características guardadas en %s (%d ventanas)", out_path, len(df_out))
+    logger.info("Consolidated features dataset saved to %s", out_path)
     return out_path
 
-# INTERFAZ CLI
+# ARGPARSE SETUP
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Extracción de características con ventanas deslizantes para analizar la fatiga."
+        description="Extract sliding-window features from enriched/processed parquet files.",
     )
     parser.add_argument(
         "--window",
         type=float,
         default=CFG.windows.size_seconds,
-        help=f"Duración de la ventana en segundos (por defecto: {CFG.windows.size_seconds}).",
+        help=f"Window duration in seconds (default: {CFG.windows.size_seconds}).",
     )
     parser.add_argument(
         "--overlap",
         type=float,
         default=0.5,
-        help="Solape entre ventanas en [0,1) (por defecto: 0.5).",
+        help="Window overlap in [0,1) (default: 0.5).",
     )
-    parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Ruta de salida del dataset de características.")
-    parser.add_argument("--source", type=str, default=None, help="Directorio opcional desde el que leer los parquets de entrada.")
+    parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output path for the features dataset.")
+    parser.add_argument("--source", type=str, default=None, help="Optional directory containing input parquets.")
     return parser.parse_args()
 
+# MAIN FUNCTION
 def main() -> None:
     args = parse_args()
 
     if not (0.0 <= args.overlap < 1.0):
-        raise ValueError("El parámetro --overlap debe estar en [0, 1). Valor recomendado: 0.5.")
+        raise ValueError("Overlap must be in the range [0, 1).")
 
     run_feature_extraction(
         window=args.window,

@@ -1,4 +1,4 @@
-"""Utilidades de configuración para el pipeline Running Fatigue Prediction."""
+"""Utility functions for configuration management."""
 
 from .settings import PipelineConfig, get_config
 

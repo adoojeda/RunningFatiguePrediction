@@ -1,10 +1,11 @@
 """
-Configuración centralizada para el pipeline Running Fatigue Prediction.
+Configuration settings for the Running Fatigue Prediction pipeline.
 
-Todas las etapas (preprocesamiento, cinemática, métricas, extracción de ventanas y modelado)
-consumen estos ajustes para mantener un comportamiento consistente. 
+All pipeline stages (preprocessing, kinematics, metrics, windowing, and modeling)
+consume these settings to maintain consistent behavior.
 """
 
+# STANDARD LIBRARIES
 from __future__ import annotations
 
 import os
@@ -12,9 +13,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Tuple
 
-# AYUDAS PARA VARIABLES DE ENTORNO
+# AUXILIARY FUNCTIONS
 def _get_float(name: str, default: float) -> float:
-    """Lee un float del entorno con retroceso seguro."""
+    """Reads a float from the environment with safe fallback."""
     value = os.getenv(name)
     try:
         return float(value) if value is not None else float(default)
@@ -22,14 +23,14 @@ def _get_float(name: str, default: float) -> float:
         return float(default)
 
 def _get_int(name: str, default: int) -> int:
-    """Lee un int del entorno con retroceso seguro."""
+    """Reads an int from the environment with safe fallback."""
     value = os.getenv(name)
     try:
         return int(value) if value is not None else int(default)
     except (TypeError, ValueError):
         return int(default)
     
-# DATACLASSES DE CONFIGURACIÓN
+# DATACLASSES DEFINITIONS
 @dataclass(frozen=True)
 class SamplingConfig:
     default_fs: float = _get_float("RFP_DEFAULT_FS", 50.0)
@@ -97,10 +98,10 @@ class PipelineConfig:
     fatigue_refs: FatigueReferences = FatigueReferences()
     workforce: WorkforceConfig = WorkforceConfig()
 
-# ACCESO A CONFIGURACIÓN CACHEADA
+# CACHED CONFIGURATION INSTANCE
 @lru_cache(maxsize=1)
 def get_config() -> PipelineConfig:
-    """Devuelve una instancia cacheada de la configuración."""
+    """Returns a cached instance of the configuration."""
     return PipelineConfig()
 
 __all__ = ["PipelineConfig", "get_config"]
