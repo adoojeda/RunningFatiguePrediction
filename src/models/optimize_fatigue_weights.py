@@ -1,19 +1,20 @@
+"""Optuna search for fatigue-score weights using the sliding-window dataset.
+
+Pipeline
+--------
+1. Recompute ``fatigue_score`` per window with candidate weights (jerk/acc/hr/spo2).
+2. Train a lightweight ``HistGradientBoostingRegressor`` with ``GroupKFold``.
+3. Evaluate R² on a grouped hold-out set (``runner_id``) and maximize it.
+4. Persist the best weight combination in ``--output-dir``.
+
+Example:
+python src/models/optimize_fatigue_weights.py \
+    --dataset data/results/features_dataset.parquet \
+    --trials 20 \
+    --output-dir data/results/modeling/weight_search
 """
-Búsqueda de pesos del índice de cansancio mediante Optuna usando el dataset de ventanas.
 
-Estrategia:
-    - Recalcular `fatigue_score` por ventana con pesos candidatos (jerk/acc/hr/spo2).
-    - Entrenar un modelo ligero (HistGradientBoostingRegressor, grid rápido) con GroupKFold.
-    - Evaluar R² en un hold-out agrupado por runner_id y maximizarlo.
-    - Registrar los mejores pesos y guardar los resultados del estudio.
-
-Uso:
-    python src/models/optimize_fatigue_weights.py \
-        --dataset data/results/features_dataset.parquet \
-        --trials 20 \
-        --output-dir data/results/modeling/weight_search
-"""
-
+# STANDARD IMPORTS
 from __future__ import annotations
 
 import argparse
@@ -30,32 +31,33 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 from sklearn.metrics import r2_score
 
-# Asegura que la raíz del proyecto está en sys.path
+# PROJECT SETUP
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# PROJECT IMPORTS
 from src.config import get_config
 from src.utils.metrics_utils import compute_fatigue_score
 
-# CONFIGURACIÓN DEL LOGGING
+# LOGGING CONFIGURATION
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# FUNCIONES AUXILIARES
+# HELPER FUNCTIONS
 def load_dataset(path: Path) -> pd.DataFrame:
     if not path.exists():
-        raise FileNotFoundError(f"Dataset no encontrado: {path}")
+        raise FileNotFoundError(f"Dataset not found: {path}")
     df = pd.read_parquet(path)
-    logger.info("Dataset cargado: %s (%d filas, %d columnas)", path, df.shape[0], df.shape[1])
+    logger.info("Dataset loaded: %s (%d rows, %d columns)", path, df.shape[0], df.shape[1])
     return df
 
 def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[str, float]) -> pd.Series:
-    """Recalcula fatigue_score por fila usando los pesos y referencias indicados."""
+    """Recompute ``fatigue_score`` per row using the provided weights and references."""
     needed = ["hr_mean", "spo2_mean", "acc_std", "jerk_std"]
     missing = [c for c in needed if c not in df.columns]
     if missing:
-        raise KeyError(f"Faltan columnas obligatorias para recalcular la fatiga: {missing}")
+        raise KeyError(f"Mandatory columns missing to recompute fatigue: {missing}")
     scores = []
     for _, row in df[needed].iterrows():
         metrics_payload = {
@@ -74,7 +76,7 @@ def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[st
     return pd.to_numeric(pd.Series(scores), errors="coerce")
 
 def train_eval(df: pd.DataFrame, target_col: str, group_col: str, seed: int) -> float:
-    """Entrena un modelo HistGB ligero y devuelve el R² en hold-out."""
+    """Train a lightweight HistGB model and return hold-out R²."""
     X = df.drop(columns=[target_col], errors="ignore")
     y = df[target_col].to_numpy()
 
@@ -125,24 +127,28 @@ def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, 
 
     return objective
 
-# ARGUMENTOS DE LÍNEA DE COMANDOS
+# COMMAND-LINE ARGUMENTS
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Búsqueda Optuna de pesos para el índice de fatiga.")
-    parser.add_argument("--dataset", type=Path, default=Path("data/results/features_dataset_3s_50olap.parquet"))
-    parser.add_argument("--trials", type=int, default=20, help="Número de iteraciones (trials) en Optuna.")
+    parser = argparse.ArgumentParser(description="Optuna search for fatigue-score weights.")
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path("data/results/features_dataset.parquet"),
+        help="Path to the window-level feature dataset (Parquet).",
+    )
+    parser.add_argument("--trials", type=int, default=20, help="Number of Optuna trials.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, default=Path("data/results/modeling/weight_search"))
     return parser.parse_args()
 
-# EJECUCIÓN PRINCIPAL
+# MAIN FUNCTION
 def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_dataset(args.dataset)
-    # Conserva la columna de grupos y las features numéricas para acelerar
     if "runner_id" not in df.columns:
-        raise KeyError("runner_id es obligatorio para la evaluación agrupada.")
+        raise KeyError("runner_id is required for grouped evaluation.")
     group_series = df["runner_id"]
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     df = df[numeric_cols]
@@ -163,7 +169,7 @@ def main() -> None:
         "hr": best["w_hr"] / total,
         "spo2": best["w_spo2"] / total,
     }
-    logger.info("Mejor R² (negativo) %.4f con pesos: %s", study.best_value, best_weights)
+    logger.info("Best negative R² %.4f with weights: %s", study.best_value, best_weights)
 
     results_path = args.output_dir / f"weight_search_{args.trials}_trials.json"
     payload = {
@@ -172,7 +178,7 @@ def main() -> None:
         "trials": args.trials,
     }
     results_path.write_text(json.dumps(payload, indent=2))
-    logger.info("Pesos óptimos guardados en %s", results_path)
+    logger.info("Optimal weights stored at %s", results_path)
 
 if __name__ == "__main__":
     main()
