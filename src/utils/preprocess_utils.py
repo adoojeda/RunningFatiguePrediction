@@ -1,37 +1,39 @@
 """
-Funciones auxiliares para el preprocesamiento de señales crudas.
+Helper utilities for the preprocessing stage.
 
-Estas utilidades cubren:
-- carga de CSV y validación de esquemas,
-- cálculo de límites de interpolación según la frecuencia de muestreo,
-- filtrado fisiológico de HR y SpO₂,
-- interpolación de huecos en HR y SpO₂,
-- eliminación de outliers de aceleración usando un umbral máximo.
+They cover:
+- loading CSV files and enforcing the expected schema,
+- converting time limits into interpolation limits,
+- physiological filtering of HR and SpO₂,
+- interpolation of short gaps,
+- removal of implausible acceleration samples.
 """
 
+# STANDARD LIBRARIES
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
+# PROJECT IMPORTS
 from src.utils.schemas import validate_dataframe
 
-# ERRORES Y DATA CLASSES
+# ERROR CLASSES
 class PreprocessError(Exception):
-    """Error base para incidencias de preprocesamiento."""
+    """Base error for preprocessing incidents."""
 
 class EmptyFileError(PreprocessError):
-    """Se lanza cuando un CSV no contiene datos."""
+    """Raised when a CSV contains no data."""
 
 class ColumnCountError(PreprocessError):
-    """Se lanza cuando el CSV de entrada no tiene el número esperado de columnas."""
+    """Raised when the CSV does not contain the expected number of columns."""
 
+# STATS DATACLASS
 @dataclass
 class PreprocessStats:
-    """Resumen por fichero para enriquecer los logs."""
+    """Per-file summary to enrich logs."""
 
     samples_in: int = 0
     samples_out: int = 0
@@ -48,14 +50,14 @@ class PreprocessStats:
             "acc_outliers_removed": self.acc_outliers_removed,
         }
     
-# MANEJO DE FICHEROS CRUDOS
+# RAW FILE HANDLING
 def load_raw_file(filepath: str, expected_columns: int = 15) -> pd.DataFrame:
-    """Lee un CSV crudo y fuerza el layout de columnas esperado."""
+    """Reads a raw CSV and enforces the expected layout."""
     df = pd.read_csv(filepath, header=None)
     if df.empty:
-        raise EmptyFileError("El archivo está vacío.")
+        raise EmptyFileError("The file is empty.")
     if df.shape[1] < expected_columns:
-        raise ColumnCountError(f"Se esperaban {expected_columns} columnas, se detectaron {df.shape[1]}.")
+        raise ColumnCountError(f"Expected {expected_columns} columns, found {df.shape[1]}.")
 
     df.columns = [
         "time",
@@ -76,51 +78,52 @@ def load_raw_file(filepath: str, expected_columns: int = 15) -> pd.DataFrame:
     ]
     return df
 
+# DATAFRAME PREPROCESSING STEPS
 def ensure_numeric(df: pd.DataFrame, columns: Optional[Sequence[str]] = None) -> None:
-    """Convierte in-place las columnas indicadas (o todas) a tipo numérico."""
+    """Converts the indicated columns (or all) to numeric in place."""
     if columns is None:
         columns = df.columns
     for col in columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
 def derive_relative_time(df: pd.DataFrame) -> pd.DataFrame:
-    """Crea `relative_time` a partir de los timestamps absolutos."""
+    """Creates `relative_time` from absolute timestamps."""
     df = df.dropna(subset=["time"]).reset_index(drop=True)
     if df.empty:
-        raise PreprocessError("Todos los valores temporales son NaN.")
+        raise PreprocessError("All timestamp values are NaN.")
     df["relative_time"] = df["time"] - df["time"].iloc[0]
     df.drop(columns=["time"], inplace=True, errors="ignore")
     return df
 
 def finalise_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Garantiza el orden de columnas y valida el esquema procesado."""
+    """Enforces the final column order and validates the processed schema."""
     ordered_columns = ["relative_time"] + [col for col in df.columns if col != "relative_time"]
     df = df[ordered_columns]
     validate_dataframe(df, "processed")
     return df
 
-# UTILIDADES DE INTERPOLACIÓN
+# INTERPOLATION UTILITIES
 def interp_limit_from_seconds(fs_est: float, seconds: float, fallback: int = 5) -> int:
-    """Convierte un umbral temporal (s) en número de muestras consecutivas a interpolar."""
+    """Converts a time span into number of consecutive samples to interpolate."""
     if not np.isfinite(fs_est) or fs_est <= 0:
         return fallback
     return max(1, int(round(fs_est * seconds)))
 
-# FILTRADO FISIOLÓGICO
+# PHYSIOLOGICAL FILTERING
 def apply_physio_filters(
     df: pd.DataFrame,
     hr_range: tuple[float, float],
     spo2_range: tuple[float, float],
 ) -> None:
-    """Reemplaza sentinelas y anula valores fisiológicos fuera de rango."""
+    """Replaces sentinels and nulls out-of-range physiological values."""
     df["hr"] = df["hr"].replace(999, np.nan)
     df["spo2"] = df["spo2"].replace(999, np.nan)
     df.loc[~df["hr"].between(*hr_range, inclusive="both"), "hr"] = np.nan
     df.loc[~df["spo2"].between(*spo2_range, inclusive="both"), "spo2"] = np.nan
 
-# INTERPOLACIÓN Y RECUPERACIÓN DE CANALES
+# CHANNEL INTERPOLATION
 def interpolate_channels(df: pd.DataFrame, limit: int) -> tuple[int, int]:
-    """Interpola HR y SpO₂ con el límite indicado; devuelve muestras recuperadas por canal."""
+    """Interpolates HR and SpO₂ and returns the number of recovered samples per channel."""
     hr_before = df["hr"].isna().sum()
     spo2_before = df["spo2"].isna().sum()
 
@@ -132,9 +135,9 @@ def interpolate_channels(df: pd.DataFrame, limit: int) -> tuple[int, int]:
 
     return max(hr_before - hr_after, 0), max(spo2_before - spo2_after, 0)
 
-# FILTRO DE OUTLIERS DE ACELERACIÓN
+# ACCELERATION OUTLIER FILTER
 def filter_acc_outliers(df: pd.DataFrame, acc_max: float) -> int:
-    """Elimina filas con aceleraciones no plausibles; devuelve cuántas muestras se descartan."""
+    """Drops rows containing implausible accelerations and returns how many were removed."""
     initial = len(df)
     mask_acc = df[["acc_x", "acc_y", "acc_z"]].abs().max(axis=1) < acc_max
 

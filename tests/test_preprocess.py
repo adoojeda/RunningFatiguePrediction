@@ -1,10 +1,13 @@
+"""Tests for the preprocessing helpers."""
+
+# STANDARD LIBRARIES
 from pathlib import Path
 import sys
-
 import pandas as pd
 import numpy as np
 import pytest
 
+# PROJECT IMPORTS
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -15,7 +18,9 @@ from src.utils.preprocess_utils import (
     apply_physio_filters,
 )
 
+# TESTS
 def test_load_raw_file_assigns_expected_columns(tmp_path):
+    """The loader should assign the canonical column names."""
     row = list(range(15))
     data = [row]
     csv_path = tmp_path / "sample.csv"
@@ -41,6 +46,7 @@ def test_load_raw_file_assigns_expected_columns(tmp_path):
     ]
 
 def test_load_raw_file_invalid_column_count(tmp_path):
+    """A CSV with fewer columns must raise ColumnCountError."""
     data = [[0.0] * 10]
     csv_path = tmp_path / "bad.csv"
     pd.DataFrame(data).to_csv(csv_path, header=False, index=False)
@@ -49,6 +55,7 @@ def test_load_raw_file_invalid_column_count(tmp_path):
         load_raw_file(str(csv_path))
 
 def test_apply_physio_filters_replaces_sentinels_and_outliers():
+    """Sentinel values and out-of-range samples are set to NaN."""
     df = pd.DataFrame(
         {
             "hr": [60, 999, 20, 220],
@@ -59,8 +66,8 @@ def test_apply_physio_filters_replaces_sentinels_and_outliers():
 
     assert np.isnan(df.loc[1, "hr"])
     assert np.isnan(df.loc[1, "spo2"])
-    assert np.isnan(df.loc[2, "hr"])  
-    assert np.isnan(df.loc[3, "hr"])  
+    assert np.isnan(df.loc[2, "hr"])
+    assert np.isnan(df.loc[3, "hr"])
     assert np.isnan(df.loc[2, "spo2"])
     assert np.isnan(df.loc[3, "spo2"])
     assert df.loc[0, "hr"] == 60
