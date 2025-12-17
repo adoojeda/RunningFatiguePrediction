@@ -1,19 +1,7 @@
-"""
-Módulo de utilidades para simplificar la carga de datos en el pipeline.
-
-Capacidades principales:
-- Cargar ficheros procesados o enriquecidos (parquet/CSV) asegurando coherencia temporal.
-- Derivar la columna `second` a partir de `relative_time` para agregaciones gruesas.
-- Promediar señales numéricas por segundo (`average_per_second`).
-- Cargar el dataset unificado de características almacenado en data/results/.
-- Concatenar sesiones para análisis exploratorio o flujos de validación.
-
-No forma parte del pipeline central, pero resulta útil para:
-    - dashboards interactivos
-    - inspecciones manuales
-    - comprobaciones de integridad del pipeline
+"""Utility helpers to load processed/enriched sessions and feature datasets.
 """
 
+# STANDARD LIBRARIES
 from __future__ import annotations
 
 import logging
@@ -24,14 +12,14 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
-# CONFIGURACIÓN DEL LOGGING
+# LOGGING CONFIGURATION
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# CONFIGURACIÓN DE RUTAS
+# PATH CONFIGURATION
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
@@ -39,8 +27,9 @@ ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 RESULTS_DIR = os.path.join(DATA_DIR, "results")
 DEFAULT_FEATURES_PATH = os.path.join(RESULTS_DIR, "features_dataset.parquet")
 
+# PATH CANDIDATE GENERATOR
 def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = None) -> List[str]:
-    """Devuelve posibles rutas dentro de *directory* derivadas de *name* y prefijos opcionales."""
+    """Return possible paths inside ``directory`` derived from ``name`` and optional prefixes."""
     if os.path.isabs(name):
         return [name]
 
@@ -58,24 +47,13 @@ def _candidate_paths(name: str, directory: str, prefixes: Optional[List[str]] = 
             unique_candidates.append(path)
     return unique_candidates
 
-# CARGA DE SESSIONS INDIVIDUALES
+# SINGLE-SESSION LOADERS
 @lru_cache(maxsize=64)
 def load_data(file_path: str) -> Optional[pd.DataFrame]:
-    """ Carga un fichero procesado o enriquecido (parquet/csv) asegurando coherencia temporal.
-
-    Returns
-    -------
-    Optional[pandas.DataFrame]
-        DataFrame que contiene al menos:
-            * `relative_time` (segundos flotantes) o `time`
-            * sensores inerciales (`acc_*`, `grav_*`, `rot_*`, `roll`, `pitch`, `yaw`)
-            * canales fisiológicos (`hr`, `spo2`)
-            * columna auxiliar `second`
-        Devuelve None si el fichero no puede leerse o está vacío.
-    """
+    """Load a processed or enriched file (Parquet/CSV) ensuring temporal coherence."""
     try:
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
+            raise FileNotFoundError(f"File not found: {file_path}")
 
         ext = os.path.splitext(file_path)[1].lower()
         if ext in (".parquet", ".parq"):
@@ -83,52 +61,42 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
         elif ext == ".csv":
             df = pd.read_csv(file_path)
         else:
-            raise ValueError(f"Formato no soportado: {ext}")
+            raise ValueError(f"Unsupported format: {ext}")
 
         if df.empty:
-            raise ValueError(f"El fichero {os.path.basename(file_path)} está vacío.")
+            raise ValueError(f"The file {os.path.basename(file_path)} is empty.")
 
         time_col = "relative_time" if "relative_time" in df.columns else "time"
         if time_col not in df.columns:
-            raise KeyError("No se encontró una columna temporal ('relative_time' o 'time').")
+            raise KeyError("Temporal column ('relative_time' or 'time') not found.")
 
         df[time_col] = pd.to_numeric(df[time_col], errors="coerce")
         df.dropna(subset=[time_col], inplace=True)
         df["second"] = np.floor(df[time_col]).astype(int)
 
-        logger.info("Cargado %s (%d filas, %d columnas)", os.path.basename(file_path), len(df), len(df.columns))
+        logger.info(
+            "Loaded %s (%d rows, %d columns)",
+            os.path.basename(file_path),
+            len(df),
+            len(df.columns),
+        )
         return df
 
     except Exception as exc:
-        logger.error("Error cargando %s: %s", file_path, exc, exc_info=True)
+        logger.error("Error loading %s: %s", file_path, exc, exc_info=True)
         return None
 
+# ENRICHED SESSION LOADER
 @lru_cache(maxsize=64)
 def load_enriched_session(name: str, *, fallback_to_processed: bool = True) -> Optional[pd.DataFrame]:
-    """
-    Carga una sesión desde `data/enriched/`.
-
-    Parameters
-    ----------
-    name:
-        Nombre del fichero (con o sin `.parquet` / prefijo `enriched_`) o ruta absoluta.
-    fallback_to_processed:
-        Cuando es True, intenta cargar el `clean_*.parquet` en `data/processed/`
-        si no se encuentra el fichero enriquecido.
-
-    Returns
-    -------
-    Optional[pandas.DataFrame]
-        DataFrame con las mismas garantías de columnas que `load_data`. Devuelve None si no
-        se localiza la sesión.
-    """
+    """Load an enriched session from ``data/enriched`` with optional fallback to processed."""
 
     for candidate in _candidate_paths(name, ENRICHED_DIR, ["enriched_"]):
         if os.path.exists(candidate):
             return load_data(candidate)
 
     if not fallback_to_processed:
-        logger.warning("La sesión enriquecida %s no se encontró en %s", name, ENRICHED_DIR)
+        logger.warning("Enriched session %s not found in %s", name, ENRICHED_DIR)
         return None
 
     processed_base = os.path.splitext(os.path.basename(name))[0]
@@ -138,17 +106,17 @@ def load_enriched_session(name: str, *, fallback_to_processed: bool = True) -> O
     for candidate in _candidate_paths(processed_base, PROCESSED_DIR, ["clean_"]):
         if os.path.exists(candidate):
             logger.warning(
-                "Fichero enriquecido %s ausente; se usa la versión procesada %s",
+                "Missing enriched %s; fallback to processed file %s",
                 name,
                 os.path.basename(candidate),
             )
             return load_data(candidate)
 
-    logger.error("La sesión %s no se encontró en enriched ni en processed.", name)
+    logger.error("Session %s not found in enriched or processed directories.", name)
     return None
 
 def list_enriched_sessions() -> List[str]:
-    """Devuelve la lista de parquets enriquecidos disponibles (ordenados alfabéticamente)."""
+    """List available enriched Parquet sessions sorted alphabetically."""
     if not os.path.isdir(ENRICHED_DIR):
         return []
     return sorted(
@@ -157,18 +125,13 @@ def list_enriched_sessions() -> List[str]:
     )
 
 def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) -> Optional[pd.DataFrame]:
-    """
-    Promedia columnas numéricas por segundo.
-
-    Útil para visualizaciones o reducir la resolución temporal. El DataFrame resultante contiene
-    `Second` junto con las columnas numéricas promediadas.
-    """
+    """Average numeric columns per second (useful for dashboards)."""
     try:
         if df is None or df.empty:
-            raise ValueError("El DataFrame está vacío o no se cargó correctamente.")
+            raise ValueError("DataFrame is empty or not loaded correctly.")
 
         if "Second" not in df.columns:
-            raise KeyError("No se encontró la columna 'Second' en el DataFrame.")
+            raise KeyError("Column 'Second' not found in DataFrame.")
 
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         if columns is not None:
@@ -176,7 +139,7 @@ def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) ->
         numeric_cols = [col for col in numeric_cols if col != "Second"]
 
         if not numeric_cols:
-            raise ValueError("No hay columnas numéricas para promediar.")
+            raise ValueError("No numeric columns available to average.")
 
         df_avg = (
             df.groupby("Second")[numeric_cols]
@@ -186,26 +149,17 @@ def average_per_second(df: pd.DataFrame, columns: Optional[List[str]] = None) ->
             .reset_index(drop=True)
         )
 
-        logger.info("Se promediaron %d filas (1 por segundo).", len(df_avg))
+        logger.info("Averaged %d rows (1 per second).", len(df_avg))
         return df_avg
 
     except Exception as exc:
-        logger.error("Error al promediar por segundo: %s", exc, exc_info=True)
+        logger.error("Error averaging per second: %s", exc, exc_info=True)
         return None
 
-# CARGADORES POR LOTES
+# MULTI-SESSION LOADERS
 @lru_cache(maxsize=8)
 def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True) -> Optional[pd.DataFrame]:
-    """
-    Carga y concatena parquets desde data/enriched o data/processed.
-
-    Parameters
-    ----------
-    limit:
-        Permite limitar el número de ficheros cargados (útil para pruebas rápidas).
-    prefer_enriched:
-        Si es True, prioriza data/enriched/. Si no hay ficheros, recurre a data/processed/.
-    """
+    """Load and concatenate all processed/enriched sessions into a single DataFrame."""
     directories: List[str] = []
     if prefer_enriched and os.path.isdir(ENRICHED_DIR):
         directories.append(ENRICHED_DIR)
@@ -213,7 +167,7 @@ def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True)
         directories.append(PROCESSED_DIR)
 
     if not directories:
-        logger.warning("No existen los directorios data/enriched ni data/processed.")
+        logger.warning("No valid directories found for loading sessions.")
         return None
 
     for directory in directories:
@@ -238,41 +192,39 @@ def load_all_sessions(limit: Optional[int] = None, prefer_enriched: bool = True)
         if dfs:
             df_all = pd.concat(dfs, ignore_index=True)
             logger.info(
-                "Se cargaron y concatenaron %d ficheros (%d filas) de %s",
+                "Loaded and concatenated %d files (%d rows) from %s",
                 len(dfs),
                 len(df_all),
                 directory,
             )
             return df_all
 
-    logger.warning("No se pudieron cargar parquets de los directorios disponibles.")
+    logger.warning("Unable to load Parquet files from the available directories.")
     return None
 
+# FEATURE DATASET LOADER
 @lru_cache(maxsize=8)
 def load_features_dataset(path: Optional[str] = None) -> Optional[pd.DataFrame]:
-    """
-    Carga el dataset unificado de características para modelado/análisis.
-    Por defecto usa data/results/features_dataset.parquet.
-    """
+    """Load the consolidated feature dataset (defaults to data/results/features_dataset.parquet)."""
     try:
         dataset_path = path or DEFAULT_FEATURES_PATH
         if not os.path.exists(dataset_path):
-            raise FileNotFoundError(f"No se encontró el dataset de características en: {dataset_path}")
+            raise FileNotFoundError(f"Feature dataset not found at: {dataset_path}")
 
         df = pd.read_parquet(dataset_path)
-        logger.info("Dataset de características cargado (%d ventanas, %d columnas).", len(df), len(df.columns))
+        logger.info("Features dataset loaded (%d windows, %d columns).", len(df), len(df.columns))
         return df
 
     except Exception as exc:
-        logger.error("Error al cargar el dataset de características: %s", exc, exc_info=True)
+        logger.error("Error loading features dataset: %s", exc, exc_info=True)
         return None
 
-# LOCAL TESTING
+# QUICK TESTS
 if __name__ == "__main__":
-    print("Prueba rápida de carga:")
+    print("Quick loading test:")
     sessions = list_enriched_sessions()
     if sessions:
-        print("Primera sesión enriquecida:", sessions[0])
+        print("First enriched session:", sessions[0])
         df_session = load_enriched_session(sessions[0])
         if df_session is not None:
             print(df_session.head(3))
@@ -282,12 +234,12 @@ if __name__ == "__main__":
         print(df_all.head(3))
         df_avg = average_per_second(df_all)
         if df_avg is not None:
-            print("\nPromedio por segundo:")
+            print("\nPer-second average:")
             print(df_avg.head(3))
 
     df_features = load_features_dataset()
     if df_features is not None:
-        print("\nDataset de características:")
+        print("\nFeatures dataset:")
         print(df_features.head(3))
 
 __all__ = [
