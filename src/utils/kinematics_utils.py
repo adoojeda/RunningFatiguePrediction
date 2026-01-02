@@ -1,34 +1,36 @@
 """
-Shared utilities for computing kinematic features in the RunningFatiguePrediction pipeline.
+Funciones compartidas para el calculo de características cinemáticas del pipeline.
 
-Includes functions for estimating sampling rates, centring accelerations, computing magnitudes,
-high-pass filtering, integrating to obtain translational velocity, and calculating jerk.
+Incluye funciones para estimar la frecuencia de muestreo, centrar aceleraciones,
+calcular magnitudes, aplicar filtros pasa-alto, integrar para obtener velocidad
+traslacional y calcular jerk.
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS 
 from __future__ import annotations
 
 import logging
 from typing import Iterable, Sequence
-import numpy as np
-import pandas as pd
-from scipy import integrate
-from scipy.signal import butter, filtfilt
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
+from scipy import integrate # type: ignore
+from scipy.signal import butter, filtfilt # type: ignore
 
-# PROJECT LIBRARIES
+# IMPORTACIONES DEL PROYECTO
 from src.config import get_config
 
+# CONFIGURACIÓN DE LOGGING
 logger = logging.getLogger(__name__)
 
-# DEFAULT PARAMETERS
+# PARÁMETROS POR DEFECTO
 CFG = get_config()
 DEFAULT_FS: float = CFG.sampling.default_fs
 DEFAULT_HP_CUTOFF: float = CFG.sampling.highpass_cutoff
 DEFAULT_VTR_SMOOTHING: int = CFG.sampling.vtr_smoothing
 
-# BASIC KINEMATICS
+# FUNCIONES AUXILIARES
 def estimate_sampling_rate(time: Sequence[float]) -> float:
-    """Estimates the sampling frequency (Hz) from a monotonically increasing time vector."""
+    """Estima la frecuencia de muestreo a partir de una secuencia temporal."""
     array = pd.to_numeric(time, errors="coerce").dropna().to_numpy() if isinstance(time, pd.Series) else np.asarray(time)
     if array.size < 2:
         return np.nan
@@ -40,12 +42,12 @@ def estimate_sampling_rate(time: Sequence[float]) -> float:
 
 def centre_accelerations(df: pd.DataFrame, axes: Iterable[str] = ("x", "y", "z"), *, prefix: str = "acc_",
                          suffix: str = "_centered") -> pd.DataFrame:
-    """Subtracts the per-axis mean and creates centred acceleration columns."""
+    """Centra las columnas de aceleración restando la media."""
     for axis in axes:
         col = f"{prefix}{axis}"
         centred = f"{col}{suffix}"
         if col not in df.columns:
-            logger.warning("Acceleration column %s not found; centring skipped.", col)
+            logger.warning("No se encontro la columna de aceleracion %s; se omite el centrado.", col)
             continue
         df[centred] = df[col] - df[col].mean()
     return df
@@ -59,7 +61,7 @@ def compute_acceleration_magnitudes(
     raw_mag_col: str = "acc_mag",
     dyn_mag_col: str = "acc_dyn_mag",
 ) -> pd.DataFrame:
-    """Computes raw and centred acceleration magnitudes."""
+    """Calcula las magnitudes de aceleración cruda y centrada."""
     required_raw = [f"{prefix}{axis}" for axis in axes]
     required_centred = [f"{prefix}{axis}{centred_suffix}" for axis in axes]
 
@@ -67,24 +69,27 @@ def compute_acceleration_magnitudes(
         df[raw_mag_col] = np.sqrt(sum(df[col] ** 2 for col in required_raw))
     else:
         missing = [col for col in required_raw if col not in df.columns]
-        logger.warning("Raw acceleration columns missing (%s); acc_mag not generated.", missing)
+        logger.warning("Faltan columnas de aceleracion cruda (%s); no se genera acc_mag.", missing)
 
     if all(col in df.columns for col in required_centred):
         df[dyn_mag_col] = np.sqrt(sum(df[col] ** 2 for col in required_centred))
     else:
         missing = [col for col in required_centred if col not in df.columns]
-        logger.warning("Centred acceleration columns missing (%s); acc_dyn_mag not generated.", missing)
+        logger.warning(
+            "Faltan columnas de aceleracion centrada (%s); no se genera acc_dyn_mag.",
+            missing,
+        )
 
     return df
 
-# ADVANCED KINEMATICS
+# FUNCIONES PRINCIPALES
 def highpass_filter(
     data: np.ndarray,
     fs: float,
     cutoff: float = DEFAULT_HP_CUTOFF,
     order: int = 3,
 ) -> np.ndarray:
-    """Butterworth high-pass filter robust to NaNs and drift."""
+    """Aplica un filtro pasa-alto Butterworth a los datos."""
     array = np.asarray(data, dtype=float)
     if not np.isfinite(fs) or fs <= 0 or array.size < 10:
         return array
@@ -113,16 +118,16 @@ def compute_translational_velocity(
     default_fs: float = DEFAULT_FS,
     cutoff: float = DEFAULT_HP_CUTOFF,
 ) -> pd.DataFrame:
-    """Integrates centred accelerations to compute translational velocity components and magnitude."""
+    """Calcula la velocidad traslacional integrando aceleraciones centradas filtradas."""
     required = [f"{accel_prefix}{axis}{centred_suffix}" for axis in axes]
     if time_col not in df.columns or any(col not in df.columns for col in required):
         missing = [col for col in [time_col, *required] if col not in df.columns]
-        logger.warning("Missing columns to compute velocity: %s", missing)
+        logger.warning("Faltan columnas para calcular velocidad: %s", missing)
         return df
 
     t = df[time_col].to_numpy(dtype=float)
     if t.size < 2:
-        logger.warning("Not enough samples to integrate velocity.")
+        logger.warning("No hay suficientes muestras para integrar la velocidad.")
         return df
 
     fs = estimate_sampling_rate(t) or default_fs
@@ -153,18 +158,18 @@ def compute_jerk(
     jerk_prefix: str = "jerk_",
     jerk_mag_col: str = "jerk_mag",
 ) -> pd.DataFrame:
-    """Differences centred accelerations to compute jerk components and magnitude."""
+    """Calcula el jerk (derivada de la aceleración) por eje y su magnitud."""
     if time_col not in df.columns:
-        logger.warning("Column %s is required to compute jerk.", time_col)
+        logger.warning("La columna %s es obligatoria para calcular jerk.", time_col)
         return df
 
     t = df[time_col].to_numpy(dtype=float)
     if t.size < 2:
-        logger.warning("Not enough samples to compute jerk.")
+        logger.warning("No hay suficientes muestras para calcular jerk.")
         return df
 
     if np.any(~np.isfinite(t)):
-        logger.warning("Time vector contains non-finite values; jerk set to NaN.")
+        logger.warning("El vector temporal contiene valores no finitos; jerk se fija a NaN.")
         for axis in axes:
             df[f"{jerk_prefix}{axis}"] = np.nan
         df[jerk_mag_col] = np.nan
@@ -172,7 +177,7 @@ def compute_jerk(
 
     diffs = np.diff(t)
     if np.any(diffs <= 0):
-        logger.warning("Time vector is not strictly increasing; jerk set to NaN.")
+        logger.warning("El vector temporal no es estrictamente creciente; jerk se fija a NaN.")
         for axis in axes:
             df[f"{jerk_prefix}{axis}"] = np.nan
         df[jerk_mag_col] = np.nan
@@ -182,12 +187,12 @@ def compute_jerk(
     for axis in axes:
         col = f"{accel_prefix}{axis}{centred_suffix}"
         if col not in df.columns:
-            logger.warning("Skipping jerk computation for %s (column missing).", col)
+            logger.warning("Se omite el jerk para %s (columna ausente).", col)
             df[f"{jerk_prefix}{axis}"] = np.nan
             continue
         values = df[col].to_numpy(dtype=float)
         if np.isnan(values).all():
-            logger.warning("All values are NaN for %s; jerk set to NaN.", col)
+            logger.warning("Todos los valores son NaN para %s; jerk se fija a NaN.", col)
             df[f"{jerk_prefix}{axis}"] = np.nan
             continue
 

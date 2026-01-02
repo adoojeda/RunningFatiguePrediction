@@ -1,39 +1,39 @@
 """
-Helper utilities for the preprocessing stage.
+Utilidades auxiliares para la etapa de preprocesamiento.
 
-They cover:
-- loading CSV files and enforcing the expected schema,
-- converting time limits into interpolation limits,
-- physiological filtering of HR and SpO₂,
-- interpolation of short gaps,
-- removal of implausible acceleration samples.
+Incluye:
+- carga de CSV y validación del esquema esperado,
+- conversión de umbrales temporales a límites de interpolación,
+- filtrado fisiológico de HR y SpO₂,
+- interpolación de huecos cortos,
+- eliminación de muestras de aceleración imposibles.
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-import numpy as np
-import pandas as pd
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
 
-# PROJECT IMPORTS
+# IMPORTS DEL PROYECTO
 from src.utils.schemas import validate_dataframe
 
-# ERROR CLASSES
+# EXCEPCIONES PERSONALIZADAS
 class PreprocessError(Exception):
-    """Base error for preprocessing incidents."""
+    """Error base para incidencias de preprocesamiento."""
 
 class EmptyFileError(PreprocessError):
-    """Raised when a CSV contains no data."""
+    """Se lanza cuando un CSV no contiene datos."""
 
 class ColumnCountError(PreprocessError):
-    """Raised when the CSV does not contain the expected number of columns."""
+    """Se lanza cuando el CSV no contiene el número de columnas esperado."""
 
-# STATS DATACLASS
+# RESUMEN DE PREPROCESAMIENTO
 @dataclass
 class PreprocessStats:
-    """Per-file summary to enrich logs."""
+    """Resumen por archivo para enriquecer los logs."""
 
     samples_in: int = 0
     samples_out: int = 0
@@ -50,14 +50,16 @@ class PreprocessStats:
             "acc_outliers_removed": self.acc_outliers_removed,
         }
     
-# RAW FILE HANDLING
+# CARGA Y VALIDACIÓN DE CSV
 def load_raw_file(filepath: str, expected_columns: int = 15) -> pd.DataFrame:
-    """Reads a raw CSV and enforces the expected layout."""
+    """Lee un CSV bruto y valida el esquema esperado."""
     df = pd.read_csv(filepath, header=None)
     if df.empty:
-        raise EmptyFileError("The file is empty.")
+        raise EmptyFileError("El archivo está vacío.")
     if df.shape[1] < expected_columns:
-        raise ColumnCountError(f"Expected {expected_columns} columns, found {df.shape[1]}.")
+        raise ColumnCountError(
+            f"Se esperaban {expected_columns} columnas, se encontraron {df.shape[1]}."
+        )
 
     df.columns = [
         "time",
@@ -78,52 +80,52 @@ def load_raw_file(filepath: str, expected_columns: int = 15) -> pd.DataFrame:
     ]
     return df
 
-# DATAFRAME PREPROCESSING STEPS
+# UTILIDADES DE PREPROCESAMIENTO
 def ensure_numeric(df: pd.DataFrame, columns: Optional[Sequence[str]] = None) -> None:
-    """Converts the indicated columns (or all) to numeric in place."""
+    """Convierte a numérico las columnas indicadas (o todas) en el propio DataFrame."""
     if columns is None:
         columns = df.columns
     for col in columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
 def derive_relative_time(df: pd.DataFrame) -> pd.DataFrame:
-    """Creates `relative_time` from absolute timestamps."""
+    """Crea `relative_time` a partir de la marca temporal absoluta."""
     df = df.dropna(subset=["time"]).reset_index(drop=True)
     if df.empty:
-        raise PreprocessError("All timestamp values are NaN.")
+        raise PreprocessError("Todas las marcas temporales son NaN.")
     df["relative_time"] = df["time"] - df["time"].iloc[0]
     df.drop(columns=["time"], inplace=True, errors="ignore")
     return df
 
 def finalise_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Enforces the final column order and validates the processed schema."""
+    """Ordena columnas y valida el esquema del dataframe procesado."""
     ordered_columns = ["relative_time"] + [col for col in df.columns if col != "relative_time"]
     df = df[ordered_columns]
     validate_dataframe(df, "processed")
     return df
 
-# INTERPOLATION UTILITIES
+# UTILIDADES DE INTERPOLACIÓN
 def interp_limit_from_seconds(fs_est: float, seconds: float, fallback: int = 5) -> int:
-    """Converts a time span into number of consecutive samples to interpolate."""
+    """Convierte un intervalo temporal en número de muestras consecutivas a interpolar."""
     if not np.isfinite(fs_est) or fs_est <= 0:
         return fallback
     return max(1, int(round(fs_est * seconds)))
 
-# PHYSIOLOGICAL FILTERING
+# FILTRADO DE DATOS FISIOLÓGICOS
 def apply_physio_filters(
     df: pd.DataFrame,
     hr_range: tuple[float, float],
     spo2_range: tuple[float, float],
 ) -> None:
-    """Replaces sentinels and nulls out-of-range physiological values."""
+    """Sustituye sentinelas y anula valores fisiológicos fuera de rango."""
     df["hr"] = df["hr"].replace(999, np.nan)
     df["spo2"] = df["spo2"].replace(999, np.nan)
     df.loc[~df["hr"].between(*hr_range, inclusive="both"), "hr"] = np.nan
     df.loc[~df["spo2"].between(*spo2_range, inclusive="both"), "spo2"] = np.nan
 
-# CHANNEL INTERPOLATION
+# INTERPOLACIÓN DE CANALES
 def interpolate_channels(df: pd.DataFrame, limit: int) -> tuple[int, int]:
-    """Interpolates HR and SpO₂ and returns the number of recovered samples per channel."""
+    """Interpola HR y SpO₂ y devuelve el número de muestras recuperadas por canal."""
     hr_before = df["hr"].isna().sum()
     spo2_before = df["spo2"].isna().sum()
 
@@ -135,9 +137,9 @@ def interpolate_channels(df: pd.DataFrame, limit: int) -> tuple[int, int]:
 
     return max(hr_before - hr_after, 0), max(spo2_before - spo2_after, 0)
 
-# ACCELERATION OUTLIER FILTER
+# FILTRADO DE MUESTRAS DE ACELERACIÓN
 def filter_acc_outliers(df: pd.DataFrame, acc_max: float) -> int:
-    """Drops rows containing implausible accelerations and returns how many were removed."""
+    """Elimina filas con aceleraciones imposibles y devuelve cuántas se eliminaron."""
     initial = len(df)
     mask_acc = df[["acc_x", "acc_y", "acc_z"]].abs().max(axis=1) < acc_max
 

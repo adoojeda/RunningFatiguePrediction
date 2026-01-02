@@ -1,26 +1,27 @@
-"""Tests for the preprocessing helpers."""
+"""Pruebas unitarias para las funciones de preprocesamiento."""
 
-# STANDARD LIBRARIES
+# LIBRERÍAS 
 from pathlib import Path
 import sys
-import pandas as pd
-import numpy as np
-import pytest
+import pandas as pd # type: ignore
+import numpy as np  # type: ignore
+import pytest # type: ignore
 
-# PROJECT IMPORTS
+# RUTA DEL PROYECTO
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# IMPORTACIONES DEL PROYECTO
 from src.utils.preprocess_utils import (
     load_raw_file,
     ColumnCountError,
     apply_physio_filters,
 )
 
-# TESTS
+# PRUEBAS UNITARIAS
 def test_load_raw_file_assigns_expected_columns(tmp_path):
-    """The loader should assign the canonical column names."""
+    """El DataFrame debe tener las columnas esperadas."""
     row = list(range(15))
     data = [row]
     csv_path = tmp_path / "sample.csv"
@@ -46,7 +47,7 @@ def test_load_raw_file_assigns_expected_columns(tmp_path):
     ]
 
 def test_load_raw_file_invalid_column_count(tmp_path):
-    """A CSV with fewer columns must raise ColumnCountError."""
+    """Debe lanzarse un ColumnCountError si el conteo de columnas es incorrecto."""
     data = [[0.0] * 10]
     csv_path = tmp_path / "bad.csv"
     pd.DataFrame(data).to_csv(csv_path, header=False, index=False)
@@ -55,7 +56,7 @@ def test_load_raw_file_invalid_column_count(tmp_path):
         load_raw_file(str(csv_path))
 
 def test_apply_physio_filters_replaces_sentinels_and_outliers():
-    """Sentinel values and out-of-range samples are set to NaN."""
+    """Los sentinelas y los valores fuera de rango deben pasar a NaN."""
     df = pd.DataFrame(
         {
             "hr": [60, 999, 20, 220],

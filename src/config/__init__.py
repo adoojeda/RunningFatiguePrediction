@@ -1,4 +1,4 @@
-"""Utility functions for configuration management."""
+"""Inicialización del módulo de configuración."""
 
 from .settings import PipelineConfig, get_config
 

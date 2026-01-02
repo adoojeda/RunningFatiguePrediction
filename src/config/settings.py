@@ -1,11 +1,11 @@
 """
-Configuration settings for the Running Fatigue Prediction pipeline.
+Configuración del pipeline de Running Fatigue Prediction.
 
-All pipeline stages (preprocessing, kinematics, metrics, windowing, and modeling)
-consume these settings to maintain consistent behavior.
+Todas las etapas (preprocesamiento, cinemática, métricas, ventanas y modelado)
+consumen esta configuración para mantener un comportamiento consistente.
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
 import os
@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Tuple
 
-# AUXILIARY FUNCTIONS
+# FUNCIONES AUXILIARES
 def _get_float(name: str, default: float) -> float:
-    """Reads a float from the environment with safe fallback."""
+    """Lee un float del entorno con un valor por defecto seguro."""
     value = os.getenv(name)
     try:
         return float(value) if value is not None else float(default)
@@ -23,14 +23,14 @@ def _get_float(name: str, default: float) -> float:
         return float(default)
 
 def _get_int(name: str, default: int) -> int:
-    """Reads an int from the environment with safe fallback."""
+    """Lee un int del entorno con un valor por defecto seguro."""
     value = os.getenv(name)
     try:
         return int(value) if value is not None else int(default)
     except (TypeError, ValueError):
         return int(default)
     
-# DATACLASSES DEFINITIONS
+# CLASES DE CONFIGURACIÓN
 @dataclass(frozen=True)
 class SamplingConfig:
     default_fs: float = _get_float("RFP_DEFAULT_FS", 50.0)
@@ -56,7 +56,7 @@ class InterpolationConfig:
 @dataclass(frozen=True)
 class WindowingConfig:
     size_seconds: float = _get_float("RFP_WINDOW_SECONDS", 3.0)
-    overlap_ratio: float = _get_float("RFP_WINDOW_OVERLAP", 0.75)
+    overlap_ratio: float = _get_float("RFP_WINDOW_OVERLAP", 0.50)
     min_samples: int = _get_int("RFP_WINDOW_MIN_SAMPLES", 5)
 
 @dataclass(frozen=True)
@@ -98,10 +98,10 @@ class PipelineConfig:
     fatigue_refs: FatigueReferences = FatigueReferences()
     workforce: WorkforceConfig = WorkforceConfig()
 
-# CACHED CONFIGURATION INSTANCE
+# CACHE DE CONFIGURACIÓN
 @lru_cache(maxsize=1)
 def get_config() -> PipelineConfig:
-    """Returns a cached instance of the configuration."""
+    """Devuelve una instancia cacheada de la configuración."""
     return PipelineConfig()
 
 __all__ = ["PipelineConfig", "get_config"]
