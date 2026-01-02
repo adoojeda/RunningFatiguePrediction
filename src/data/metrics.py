@@ -1,18 +1,18 @@
 """
-Biomechanical/physiological metrics (stage 3/5 of the pipeline):
-- High-pass filter + integration of centred accelerations → translational velocity (Vtr).
-- Jerk computation (acceleration derivative) and fatigue score estimation.
-- Saves the enriched sessions and the consolidated metrics table.
+Métricas biomecánicas y fisiológicas (etapa 3/5 del pipeline):
+- Filtro pasa-alto + integración de aceleraciones centradas → velocidad traslacional (vtr).
+- Cálculo de jerk (derivada de la aceleración) y estimación del fatigue_score.
+- Actualiza las sesiones enriquecidas para su uso en etapas posteriores.
 
-Example:
-    python src/data/metrics.py --input-dir data/enriched --output-dir data/results
+Ejemplo:
+    python src/data/metrics.py --input-dir data/enriched
 
-Input:  data/enriched/enriched_*.parquet
-Output: updated enriched files + data/results/all_sessions_metrics.parquet
-Next:   python src/features/features_extraction.py
+Entrada:  data/enriched/enriched_*.parquet
+Salida:   enriched actualizados
+Siguiente: python src/features/features_extraction.py
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
 import argparse
@@ -22,15 +22,15 @@ import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
-import numpy as np
-import pandas as pd
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
 
-# PROJECT ROOT ADJUSTMENT
+# AJUSTE DE RUTA DEL PROYECTO
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# PROJECT LIBRARIES
+# LIBRERÍAS DEL PROYECTO
 from src.config import get_config
 from src.utils.kinematics_utils import (
     DEFAULT_FS,
@@ -47,41 +47,39 @@ from src.utils.metrics_utils import (
 )
 from src.utils.schemas import validate_dataframe
 
-# LOGGING CONFIGURATION
+# CONFIGURACIÓN DE LOGGING
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# PATHS AND CONFIG
+# RUTAS Y CONFIGURACIÓN
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DEFAULT_ENRICHED_DIR = os.path.join(DATA_DIR, "enriched")
 DEFAULT_PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
-DEFAULT_RESULTS_DIR = os.path.join(DATA_DIR, "results")
-DEFAULT_OUTPUT_PARQUET = os.path.join(DEFAULT_RESULTS_DIR, "all_sessions_metrics.parquet")
 
 CFG = get_config()
 SCORE_SMOOTHING = getattr(CFG.fatigue_weights, "smoothing_window", 0)
 
-# EXCEPTION CLASSES AND DATACLASSES
+# EXCEPCIONES Y DATACLASS
 class MetricsError(Exception):
-    """Base exception for the metrics pipeline."""
+    """Excepción base del pipeline de métricas."""
 
 @dataclass
 class SessionResult:
-    """Summary of a processed session."""
+    """Resumen de una sesión procesada."""
     file: str
     fatigue_score: float
     metrics: Dict[str, float]
 
-# FILE MANAGEMENT
+# UTILIDADES
 def list_session_files(source_dir: str, files: Optional[Sequence[str]] = None) -> List[str]:
-    """Returns the sorted list of session files to process."""
+    """Lista los archivos de sesión a procesar."""
     directory = os.path.abspath(source_dir)
     if not os.path.isdir(directory):
-        raise FileNotFoundError(f"Directory not found: {directory}")
+        raise FileNotFoundError(f"No se encontró el directorio: {directory}")
 
     if files:
         resolved = []
@@ -98,27 +96,16 @@ def list_session_files(source_dir: str, files: Optional[Sequence[str]] = None) -
     processed = sorted(os.path.join(directory, f) for f in os.listdir(directory) if f.startswith("clean_") and f.endswith(".parquet"))
     return processed
 
-def save_metrics_table(results: List[Dict[str, float]], output_path: str) -> Optional[pd.DataFrame]:
-    """Stores the aggregated metrics table."""
-    if not results:
-        return None
-    df_all = pd.DataFrame(results)
-    output_path = output_path or DEFAULT_OUTPUT_PARQUET
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df_all.to_parquet(output_path, index=False)
-    logger.info("Global metrics stored at %s (%d sessions)", output_path, len(df_all))
-    return df_all
-
-# SESSION PROCESSING
+# PROCESAMIENTO DE SESIONES
 def _load_session(path: str) -> pd.DataFrame:
-    """Loads a parquet file validating the appropriate schema."""
+    """Carga y valida un archivo de sesión."""
     df = pd.read_parquet(path)
     schema_name = "enriched" if os.path.basename(path).startswith("enriched_") else "processed"
     validate_dataframe(df, schema_name)
     return df
 
 def _apply_biomechanics(df: pd.DataFrame) -> pd.DataFrame:
-    """Applies biomechanical enrichments prior to scoring."""
+    """Aplica cálculos biomecánicos al dataframe."""
     if "relative_time" in df.columns:
         df = (
             df.sort_values("relative_time")
@@ -136,24 +123,24 @@ def _apply_biomechanics(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def _save_enriched(df: pd.DataFrame, path: str) -> bool:
-    """Saves the enriched dataframe to disk."""
+    """Guarda el dataframe enriquecido en el archivo especificado."""
     try:
         df = df.loc[:, ~df.columns.duplicated()]
         df.to_parquet(path, index=False)
-        logger.info("Enriched file updated: %s", os.path.basename(path))
+        logger.info("Archivo enriched actualizado: %s", os.path.basename(path))
         return True
     except Exception as exc:
         logger.error(
-            "Error while saving enriched file %s: %s",
+            "Error al guardar archivo enriched %s: %s",
             os.path.basename(path),
             exc,
             exc_info=True,
         )
         return False
 
-# MAIN PROCESSING FUNCTIONS
+# FUNCIONES PRINCIPALES
 def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
-    """Processes a session file and returns the computed metrics."""
+    """Procesa una sesión individual y calcula sus métricas."""
     try:
         df = _load_session(path)
         df = _apply_biomechanics(df)
@@ -170,7 +157,7 @@ def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
 
         fatigue_score = session_metrics.get("fatigue_score", np.nan)
         logger.info(
-            "Session %s -> fatigue_score=%.3f",
+            "Sesión %s -> fatigue_score=%.3f",
             os.path.basename(path),
             fatigue_score,
         )
@@ -181,81 +168,69 @@ def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
         )
 
     except Exception as exc:
-        logger.error("Error processing %s: %s", os.path.basename(path), exc, exc_info=True)
+        logger.error("Error al procesar %s: %s", os.path.basename(path), exc, exc_info=True)
         return None
 
-# GLOBAL PROCESSING
+# PROCESAMIENTO GLOBAL
 def process_all_sessions(
     *,
     input_dir: Optional[str] = None,
-    output_path: Optional[str] = None,
     save_enriched: bool = True,
     files: Optional[Sequence[str]] = None,
-) -> Optional[pd.DataFrame]:
-    """Processes every session and generates the global summary."""
+) -> Optional[int]:
+    """Procesa todas las sesiones en el directorio especificado."""
     source_dir = input_dir or (
         DEFAULT_ENRICHED_DIR if os.path.isdir(DEFAULT_ENRICHED_DIR) else DEFAULT_PROCESSED_DIR
     )
 
     session_files = list_session_files(source_dir, files)
     if not session_files:
-        logger.warning("No files found in %s", source_dir)
+        logger.warning("No se encontraron archivos en %s", source_dir)
         return None
 
-    results: List[Dict[str, float]] = []
+    processed = 0
     for path in session_files:
         allow_save = save_enriched and os.path.basename(path).startswith("enriched_")
         result = process_session(path, allow_save=allow_save)
         if result:
-            results.append(
-                {
-                    "session_file": result.file,
-                    "fatigue_score": result.fatigue_score,
-                }
-            )
+            processed += 1
 
-    return save_metrics_table(results, output_path or DEFAULT_OUTPUT_PARQUET)
+    return processed
 
-# COMMAND-LINE INTERFACE
+# INTERFAZ DE LÍNEA DE COMANDOS
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Computes biomechanical metrics and fatigue scores."
+        description="Calcula métricas biomecánicas y fatigue_score."
     )
     parser.add_argument(
         "--input-dir",
-        help="Directory containing enriched_*.parquet files (default: data/enriched).",
-    )
-    parser.add_argument(
-        "--output-dir",
-        help="Directory where the metrics parquet will be stored (default: data/results).",
+        help="Directorio con enriched_*.parquet (por defecto: data/enriched).",
     )
     parser.add_argument(
         "--no-save",
         action="store_true",
-        help="Do not overwrite the enriched files with the new scores.",
+        help="No sobrescribir archivos enriched con nuevos scores.",
     )
     parser.add_argument(
         "--files",
         nargs="*",
-        help="Optional list of specific files (paths or names) to process.",
+        help="Lista opcional de archivos a procesar (rutas o nombres).",
     )
     return parser.parse_args()
 
-# MAIN ENTRY POINT
+# FUNCIÓN MAIN
 def main() -> None:
     args = parse_args()
-    output_dir = args.output_dir or DEFAULT_RESULTS_DIR
-    output_path = os.path.join(output_dir, "all_sessions_metrics.parquet")
-
-    df_metrics = process_all_sessions(
+    total = process_all_sessions(
         input_dir=args.input_dir,
-        output_path=output_path,
         save_enriched=not args.no_save,
         files=args.files,
     )
 
-    if df_metrics is None:
-        logger.warning("No metrics were generated.")
+    if total is None:
+        logger.warning("No se generaron métricas.")
+    else:
+        logger.info("Sesiones procesadas: %d", total)
 
 if __name__ == "__main__":
     main()

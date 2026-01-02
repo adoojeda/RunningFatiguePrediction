@@ -1,63 +1,63 @@
-"""Optuna search for fatigue-score weights using the sliding-window dataset.
+"""Búsqueda de pesos del fatigue_score con Optuna usando el dataset por ventanas.
 
 Pipeline
 --------
-1. Recompute ``fatigue_score`` per window with candidate weights (jerk/acc/hr/spo2).
-2. Train a lightweight ``HistGradientBoostingRegressor`` with ``GroupKFold``.
-3. Evaluate R² on a grouped hold-out set (``runner_id``) and maximize it.
-4. Persist the best weight combination in ``--output-dir``.
+1. Recalcular ``fatigue_score`` por ventana con pesos candidatos (jerk/acc/hr/spo2).
+2. Entrenar un ``HistGradientBoostingRegressor`` ligero con ``GroupKFold``.
+3. Evaluar R² en un hold-out agrupado por ``runner_id`` y maximizarlo.
+4. Guardar la mejor combinación de pesos en ``--output-dir``.
 
-Example:
+Ejemplo:
 python src/models/optimize_fatigue_weights.py \
     --dataset data/results/features_dataset.parquet \
     --trials 20 \
     --output-dir data/results/modeling/weight_search
 """
 
-# STANDARD IMPORTS
+# IMPORTS ESTÁNDAR
 from __future__ import annotations
 
 import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict
 
-import numpy as np
-import optuna
-import pandas as pd
+import numpy as np # type: ignore
+import optuna # type: ignore
+import pandas as pd # type: ignore
 import sys
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit
-from sklearn.metrics import r2_score
+from sklearn.ensemble import HistGradientBoostingRegressor # type: ignore
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit # type: ignore
+from sklearn.metrics import r2_score # type: ignore
 
-# PROJECT SETUP
+# CONFIGURACIÓN DEL PROYECTO
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# PROJECT IMPORTS
+# IMPORTS DEL PROYECTO
 from src.config import get_config
 from src.utils.metrics_utils import compute_fatigue_score
 
-# LOGGING CONFIGURATION
+# CONFIGURACIÓN DE LOGGING
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# HELPER FUNCTIONS
+# FUNCIONES AUXILIARES
 def load_dataset(path: Path) -> pd.DataFrame:
     if not path.exists():
-        raise FileNotFoundError(f"Dataset not found: {path}")
+        raise FileNotFoundError(f"No se encontró el dataset: {path}")
     df = pd.read_parquet(path)
-    logger.info("Dataset loaded: %s (%d rows, %d columns)", path, df.shape[0], df.shape[1])
+    logger.info("Dataset cargado: %s (%d filas, %d columnas)", path, df.shape[0], df.shape[1])
     return df
 
 def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[str, float]) -> pd.Series:
-    """Recompute ``fatigue_score`` per row using the provided weights and references."""
+    """Recalcula el fatigue_score para cada fila del DataFrame usando los pesos dados."""
     needed = ["hr_mean", "spo2_mean", "acc_std", "jerk_std"]
     missing = [c for c in needed if c not in df.columns]
     if missing:
-        raise KeyError(f"Mandatory columns missing to recompute fatigue: {missing}")
+        raise KeyError(f"Faltan columnas obligatorias para recalcular fatiga: {missing}")
     scores = []
     for _, row in df[needed].iterrows():
         metrics_payload = {
@@ -76,7 +76,8 @@ def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[st
     return pd.to_numeric(pd.Series(scores), errors="coerce")
 
 def train_eval(df: pd.DataFrame, target_col: str, group_col: str, seed: int) -> float:
-    """Train a lightweight HistGB model and return hold-out R²."""
+    """Entrena y evalúa un modelo regresor usando GroupKFold y devuelve el R² en el conjunto de prueba.
+    """
     X = df.drop(columns=[target_col], errors="ignore")
     y = df[target_col].to_numpy()
 
@@ -127,28 +128,33 @@ def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, 
 
     return objective
 
-# COMMAND-LINE ARGUMENTS
+# PARSER DE ARGUMENTOS
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Optuna search for fatigue-score weights.")
+    parser = argparse.ArgumentParser(description="Búsqueda de pesos del fatigue_score con Optuna.")
     parser.add_argument(
         "--dataset",
         type=Path,
         default=Path("data/results/features_dataset.parquet"),
-        help="Path to the window-level feature dataset (Parquet).",
+        help="Ruta al dataset de ventanas (Parquet).",
     )
-    parser.add_argument("--trials", type=int, default=20, help="Number of Optuna trials.")
+    parser.add_argument("--trials", type=int, default=20, help="Número de trials de Optuna.")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-dir", type=Path, default=Path("data/results/modeling/weight_search"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("data/results/modeling/weight_search"),
+        help="Directorio de salida para los resultados.",
+    )
     return parser.parse_args()
 
-# MAIN FUNCTION
+# FUNCIÓN PRINCIPAL
 def main() -> None:
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     df = load_dataset(args.dataset)
     if "runner_id" not in df.columns:
-        raise KeyError("runner_id is required for grouped evaluation.")
+        raise KeyError("runner_id es obligatorio para la evaluación agrupada.")
     group_series = df["runner_id"]
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     df = df[numeric_cols]
@@ -169,7 +175,7 @@ def main() -> None:
         "hr": best["w_hr"] / total,
         "spo2": best["w_spo2"] / total,
     }
-    logger.info("Best negative R² %.4f with weights: %s", study.best_value, best_weights)
+    logger.info("Mejor R² negativo %.4f con pesos: %s", study.best_value, best_weights)
 
     results_path = args.output_dir / f"weight_search_{args.trials}_trials.json"
     payload = {
@@ -178,7 +184,7 @@ def main() -> None:
         "trials": args.trials,
     }
     results_path.write_text(json.dumps(payload, indent=2))
-    logger.info("Optimal weights stored at %s", results_path)
+    logger.info("Pesos óptimos guardados en %s", results_path)
 
 if __name__ == "__main__":
     main()

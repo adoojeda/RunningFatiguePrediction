@@ -8,7 +8,7 @@ Este repositorio procesa señales capturadas por relojes inteligentes para gener
    - entrada: `data/raw/*.csv`
    - salida: `data/processed/clean_*.parquet`
    - limpia marcas temporales, interpola FC/SpO₂ y elimina outliers evidentes
-   - banderas opcionales `--input-dir` y `--output-dir` permiten trabajar con otras carpetas
+   - banderas opcionales `--input-dir`, `--output-dir` y `--files <lista>` permiten trabajar con carpetas o subconjuntos específicos
    - **Mapa de columnas del CSV bruto**
 
      | Posición | Descripción            | Nombre asignado |
@@ -45,7 +45,7 @@ Este repositorio procesa señales capturadas por relojes inteligentes para gener
    - construye ventanas deslizantes de 3 s (50 % de solape) alineadas con los objetivos de fatiga/RPE
 
 5. **Análisis y dashboards** – scripts en `src/analysis/` y `src/app/`
-   - generan figuras de EDA (`eda_features.py`) y vistas interactivas (`dashboard.py`)
+  - generan figuras de EDA (`eda_features.py`), reportes de ablaciones (`ablation_summary.py`) y vistas interactivas (`dashboard.py`)
 
 ## Conjunto de características utilizado en el modelado
 
@@ -53,8 +53,10 @@ Tras auditar cobertura, varianza y redundancia, la etapa de modelado consume una
 
 ## Flujo de modelado
 
-- **Experimentos**: `python src/models/run_experiments.py --dataset data/results/features_dataset.parquet --target fatigue_score --group runner_id --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost --save-predictions --save-models [--fast-grid opcional]`
+- **Experimentos**: `python src/models/run_experiments.py --dataset data/results/features_dataset.parquet --target fatigue_score --group runner_id --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost [--fast-grid opcional]`
   - ejecuta experimentos agrupados por corredor, lanza GridSearchCV para cada modelo y guarda métricas, predicciones, hashes y modelos serializados en `data/results/modeling/experiments/`.
+- **Ablaciones de características**: `python src/models/run_ablation.py --dataset data/results/features_dataset.parquet --target fatigue_score --group runner_id --exclude-blocks orientacion fisiologia`
+  - genera versiones del experimento eliminando bloques de señales (fisiología, orientación, jerk, etc.) y guarda los resultados en `data/results/modeling/ablation/<bloques>/`.
 
 ## Flujo de inferencia
 

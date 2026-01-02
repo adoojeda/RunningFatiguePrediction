@@ -1,6 +1,6 @@
 """Pruebas unitarias para las funciones de preprocesamiento."""
 
-# LIBRERÍAS 
+# LIBRERÍAS ESTÁNDAR
 from pathlib import Path
 import sys
 import pandas as pd # type: ignore

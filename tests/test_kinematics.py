@@ -1,12 +1,12 @@
-"""Pruebas para el modulo de procesamiento cinematico."""
+"""Pruebas para el módulo de procesamiento cinemático."""
 
-# LIBRERIAS ESTANDAR
+# LIBRERÍAS ESTÁNDAR
 from pathlib import Path
 import sys
 
 import pandas as pd # type: ignore
 
-# RUTA AL DIRECTORIO RAIZ
+# RUTA AL DIRECTORIO RAÍZ
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))

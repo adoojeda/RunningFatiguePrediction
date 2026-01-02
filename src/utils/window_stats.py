@@ -1,15 +1,15 @@
 """
-Shared statistical functions used by the sliding-window feature extraction.
+Funciones estadísticas compartidas usadas en la extracción por ventanas.
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
-import numpy as np
+import numpy as np # type: ignore
 
-# FUNCTIONS
+# FUNCIONES
 def mad(x: np.ndarray) -> float:
-    """Median absolute deviation; robust to outliers."""
+    """Desviación absoluta mediana (MAD) devolviendo NaN si no hay muestras."""
     x = x[~np.isnan(x)]
     if x.size == 0:
         return np.nan
@@ -17,7 +17,7 @@ def mad(x: np.ndarray) -> float:
     return float(np.median(np.abs(x - med)))
 
 def skewness(x: np.ndarray) -> float:
-    """Sample skewness handling NaNs."""
+    """Asimetría (skewness) devolviendo NaN si no hay muestras suficientes."""
     x = x[~np.isnan(x)]
     if x.size < 3:
         return np.nan
@@ -28,7 +28,7 @@ def skewness(x: np.ndarray) -> float:
     return float(np.mean(((x - m) / s) ** 3))
 
 def kurtosis(x: np.ndarray) -> float:
-    """Excess kurtosis (Fisher) returning NaN if samples are insufficient."""
+    """Curtosis (kurtosis) devolviendo NaN si no hay muestras suficientes."""
     x = x[~np.isnan(x)]
     if x.size < 4:
         return np.nan
@@ -39,7 +39,7 @@ def kurtosis(x: np.ndarray) -> float:
     return float(np.mean(((x - m) / s) ** 4) - 3.0)
 
 def safe_stats(x: np.ndarray) -> tuple[float, float, float]:
-    """Returns (mean, std, median) tolerating empty segments or NaNs."""
+    """Calcula media, desviación estándar y mediana, manejando NaN."""
     cleaned = x[~np.isnan(x)]
     if cleaned.size == 0:
         return np.nan, np.nan, np.nan

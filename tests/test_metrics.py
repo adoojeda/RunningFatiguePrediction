@@ -1,23 +1,23 @@
-"""Tests for fatigue metrics utilities."""
+"""Pruebas para las utilidades de métricas de cansancio."""
 
-# STANDARD LIBRARIES
+# LIBRERÍAS ESTÁNDAR
 from pathlib import Path
 import sys
 
-import numpy as np
-import pandas as pd
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
 
-# PROJECT SETUP
+# CONFIGURACIÓN DEL PROYECTO
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# PROJECT IMPORTS
+# IMPORTS DEL PROYECTO
 from src.utils.metrics_utils import compute_fatigue_score, derive_fatigue_references
 
-# TESTS
+# PRUEBAS DE MÉTRICAS
 def test_compute_fatigue_score_respects_weights():
-    """Fatigue score should stay in [0,1] and reflect provided weights."""
+    """El cálculo del fatigue_score debe respetar los pesos dados."""
     metrics = {
         "hr_mean": 150,
         "spo2_mean": 95,
@@ -36,7 +36,7 @@ def test_compute_fatigue_score_respects_weights():
     assert 0.0 <= result["fatigue_score"] <= 1.0
 
 def test_derive_fatigue_references_uses_percentiles():
-    """References should come from session percentiles/std."""
+    """Las referencias de cansancio deben derivarse usando percentiles seguros."""
     df = pd.DataFrame(
         {
             "hr": [100, 110, 120, 130, 140],

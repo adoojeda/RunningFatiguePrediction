@@ -1,34 +1,34 @@
 """
-Utilities for sliding-window feature extraction.
+Utilidades para la extracción de características por ventanas deslizantes.
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterator, List, Optional, Sequence, Tuple
 
-import numpy as np
-import pandas as pd
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
 
-# CONFIGURATION
+# CLASES DE DATOS
 @dataclass(frozen=True)
 class WindowParams:
-    """Configuration used by the sliding-window process."""
+    """Parámetros para ventanas deslizantes."""
     size: float
     step: float
     min_samples: int
 
-# WINDOWING UTILITIES
+# UTILIDADES DE VENTANAS
 def create_window_params(window: float, overlap: float, *, min_samples: int) -> WindowParams:
-    """Builds window parameters, ensuring a valid step size."""
+    """Crea parámetros de ventana deslizante."""
     step = window * (1.0 - overlap)
     if step <= 0:
-        raise ValueError("Step size is <= 0. Check window/overlap configuration.")
+        raise ValueError("El tamaño del paso es <= 0. Revisa ventana/solape.")
     return WindowParams(size=window, step=step, min_samples=min_samples)
 
 def prepare_dataframe(df: pd.DataFrame, numeric_cols: Sequence[str]) -> pd.DataFrame:
-    """Sorts by time and coerces numeric columns before windowing."""
+    """Prepara el DataFrame para el procesamiento de ventanas deslizantes."""
     df = df.sort_values("relative_time").reset_index(drop=True)
     for col in numeric_cols:
         if col in df.columns:
@@ -36,11 +36,11 @@ def prepare_dataframe(df: pd.DataFrame, numeric_cols: Sequence[str]) -> pd.DataF
     return df
 
 def iter_windows(df: pd.DataFrame, params: WindowParams) -> Iterator[Tuple[float, float, pd.DataFrame]]:
-    """Generates (start, end, dataframe) triplets across the dataframe."""
+    """Genera ventanas deslizantes sobre el DataFrame dado."""
     t_start = float(df["relative_time"].min())
     t_end = float(df["relative_time"].max())
     if not np.isfinite(t_start) or not np.isfinite(t_end) or t_end <= t_start:
-        raise ValueError("Invalid relative_time range.")
+        raise ValueError("Rango de relative_time inválido.")
 
     current = t_start
     while current + params.size <= t_end + 1e-9:

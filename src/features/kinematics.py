@@ -11,7 +11,7 @@ Salida:   data/enriched/enriched_*.parquet
 Siguiente: python src/data/metrics.py
 """
 
-# LIBRERÍAS 
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
 import argparse
@@ -24,30 +24,30 @@ from typing import List, Optional, Sequence
 
 import pandas as pd # type: ignore
 
-# CONFIGURACION DEL PATH DEL PROYECTO
+# CONFIGURACIÓN DEL PATH DEL PROYECTO
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# LIBRERIAS DEL PROYECTO
+# LIBRERÍAS DEL PROYECTO
 from src.utils.kinematics_utils import centre_accelerations, compute_acceleration_magnitudes
 from src.utils.schemas import validate_dataframe
 
-# CONFIGURACION DE LOGGING
+# CONFIGURACIÓN DE LOGGING
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# CONFIGURACION DE RUTAS
+# CONFIGURACIÓN DE RUTAS
 BASE_DIR = PROJECT_ROOT
 DEFAULT_PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 DEFAULT_ENRICHED_DIR = os.path.join(BASE_DIR, "data", "enriched")
 
 # DEFINICIÓN DE EXCEPCIONES
 class KinematicsError(Exception):
-    """Se lanza cuando falla una transformacion cinematica."""
+    """Se lanza cuando falla una transformación cinemática."""
 
 # DEFINICIONES DE DATACLASS
 @dataclass
@@ -114,7 +114,7 @@ def process_single_file(
             output_path=output_path,
         )
         logger.info(
-            "Caracteristicas cinematicas guardadas en %s (columnas: %d → %d)",
+            "Características cinemáticas guardadas en %s (columnas: %d → %d)",
             os.path.basename(output_path),
             stats.columns_before,
             stats.columns_after,
@@ -128,7 +128,7 @@ def process_single_file(
 def list_processed_files(source_dir: str) -> List[str]:
     """Lista todos los archivos procesados en el directorio dado."""
     if not os.path.isdir(source_dir):
-        raise FileNotFoundError(f"No se encontro el directorio de procesados: {source_dir}")
+        raise FileNotFoundError(f"No se encontró el directorio de procesados: {source_dir}")
     files = sorted(
         os.path.join(source_dir, fname)
         for fname in os.listdir(source_dir)
@@ -212,7 +212,7 @@ def main() -> None:
     if total:
         logger.info("Generación de características cinemáticas completada. Archivos procesados: %d", total)
     elif total == 0:
-        logger.warning("No se proceso ningún archivo.")
+        logger.warning("No se procesó ningún archivo.")
 
 if __name__ == "__main__":
     main()

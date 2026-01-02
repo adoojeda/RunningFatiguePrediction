@@ -1,12 +1,12 @@
 """
-Funciones compartidas para el calculo de características cinemáticas del pipeline.
+Funciones compartidas para el cálculo de características cinemáticas del pipeline.
 
 Incluye funciones para estimar la frecuencia de muestreo, centrar aceleraciones,
 calcular magnitudes, aplicar filtros pasa-alto, integrar para obtener velocidad
 traslacional y calcular jerk.
 """
 
-# LIBRERÍAS 
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
 import logging
@@ -47,7 +47,7 @@ def centre_accelerations(df: pd.DataFrame, axes: Iterable[str] = ("x", "y", "z")
         col = f"{prefix}{axis}"
         centred = f"{col}{suffix}"
         if col not in df.columns:
-            logger.warning("No se encontro la columna de aceleracion %s; se omite el centrado.", col)
+            logger.warning("No se encontró la columna de aceleración %s; se omite el centrado.", col)
             continue
         df[centred] = df[col] - df[col].mean()
     return df
@@ -69,14 +69,14 @@ def compute_acceleration_magnitudes(
         df[raw_mag_col] = np.sqrt(sum(df[col] ** 2 for col in required_raw))
     else:
         missing = [col for col in required_raw if col not in df.columns]
-        logger.warning("Faltan columnas de aceleracion cruda (%s); no se genera acc_mag.", missing)
+        logger.warning("Faltan columnas de aceleración cruda (%s); no se genera acc_mag.", missing)
 
     if all(col in df.columns for col in required_centred):
         df[dyn_mag_col] = np.sqrt(sum(df[col] ** 2 for col in required_centred))
     else:
         missing = [col for col in required_centred if col not in df.columns]
         logger.warning(
-            "Faltan columnas de aceleracion centrada (%s); no se genera acc_dyn_mag.",
+            "Faltan columnas de aceleración centrada (%s); no se genera acc_dyn_mag.",
             missing,
         )
 
