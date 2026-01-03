@@ -1,15 +1,14 @@
 """
-Exploratory data analysis (EDA) for the sliding-window dataset.
+Análisis exploratorio (EDA) del dataset por ventanas.
 
-Generates descriptive statistics and a series of plots linking biomechanical/physiological
-metrics with perceived exertion (RPE). Supports filtering by session/metric and exporting
-all figures inside a ZIP archive.
+Genera estadísticas descriptivas y gráficos que relacionan métricas biomecánicas/fisiológicas
+con el esfuerzo percibido (RPE). Permite filtrar por sesión/métrica y exportar figuras en un ZIP.
 
-Example:
+Ejemplo:
     python src/analysis/eda_features.py --dataset data/results/features_dataset.parquet --output data/results/eda_figures
 """
 
-# STANDARD LIBRARY IMPORTS
+# LIBRERÍAS 
 from __future__ import annotations
 
 import argparse
@@ -20,22 +19,20 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from zipfile import ZipFile
 
-import matplotlib
+import matplotlib # type: ignore
 
 matplotlib.use("Agg")  
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from scipy import stats
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
+from scipy import stats # type: ignore
 
-# ROOT PROJECT CONFIGURATION
+# CONFIGURACIÓN DEL PROYECTO
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-# PROJECT IMPORTS
+# IMPORTS DEL PROYECTO
 from src.utils.data_loader import load_features_dataset
 from src.utils.eda_plots import (
     plot_correlation_heatmap,
@@ -45,59 +42,60 @@ from src.utils.eda_plots import (
     plot_specialised_relationships,
 )
 
-# LOGGING CONFIGURATION
+# CONFIGURACIÓN DE LOGGING
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ROOT DIRECTORIES AND CONSTANTS
+# DIRECTORIOS
 RESULTS_DIR = os.path.join(BASE_DIR, "data", "results")
 DEFAULT_DATASET = os.path.join(RESULTS_DIR, "features_dataset.parquet")
 DEFAULT_OUTPUT_DIR = os.path.join(RESULTS_DIR, "eda_figures")
 
+# MÉTRICAS CANDIDATAS
 RPE_METRIC_CANDIDATES = [
     "hr_mean",
-    "fatigue_score",
+    "physical_fatigue_index",
     "jerk_std",
     "acc_mean",
     "acc_std",
     "acc_mag_mad",
     "vtr_mean",
     "spo2_mean",
-    "fc_mean",
 ]
 
+# PARES PARA CÁLCULO DE P-VALUES
 P_VALUE_PAIRS: List[tuple[str, str]] = [
-    ("hr_mean", "fatigue_score"),
+    ("hr_mean", "physical_fatigue_index"),
     ("hr_mean", "reported_rpe"),
     ("hr_mean", "vtr_mean"),
     ("hr_mean", "jerk_std"),
-    ("fatigue_score", "reported_rpe"),
-    ("fatigue_score", "vtr_mean"),
-    ("fatigue_score", "jerk_std"),
+    ("physical_fatigue_index", "reported_rpe"),
+    ("physical_fatigue_index", "vtr_mean"),
+    ("physical_fatigue_index", "jerk_std"),
     ("reported_rpe", "vtr_mean"),
     ("reported_rpe", "jerk_std"),
     ("vtr_mean", "jerk_std"),
 ]
 
-# P-VALUE COMPUTATION
+# CÁLCULO DE P-VALUES
 def compute_pvalues(
     df: pd.DataFrame,
     output_dir: str,
     pairs: Optional[List[tuple[str, str]]] = None,
 ) -> Optional[str]:
-    """Computes Pearson correlation p-values for selected pairs."""
+    """Calcula los p-values de Pearson para pares de métricas y guarda en CSV."""
     pairs = pairs or P_VALUE_PAIRS
     records: List[Dict[str, float]] = []
     for x, y in pairs:
         if x not in df.columns or y not in df.columns:
-            logger.warning("Unable to compute p-value for %s vs %s; missing columns.", x, y)
+            logger.warning("No se puede calcular el p-value para %s vs %s; faltan columnas.", x, y)
             continue
         sample = df[[x, y]].replace([np.inf, -np.inf], np.nan).dropna()
         if len(sample) < 3:
-            logger.warning("Not enough samples for %s vs %s; skipping.", x, y)
+            logger.warning("No hay suficientes muestras para %s vs %s; se omite.", x, y)
             continue
         try:
             r, p = stats.pearsonr(sample[x], sample[y])
@@ -111,26 +109,26 @@ def compute_pvalues(
                 }
             )
         except Exception as exc:
-            logger.warning("Error computing p-value for %s vs %s: %s", x, y, exc)
+            logger.warning("Error al calcular p-value para %s vs %s: %s", x, y, exc)
 
     if not records:
-        logger.warning("No p-values were generated; check dataset and columns.")
+        logger.warning("No se generaron p-values; revisa el dataset y las columnas.")
         return None
 
     df_p = pd.DataFrame(records)
     path = os.path.join(output_dir, "pvalues.csv")
     df_p.to_csv(path, index=False)
-    logger.info("p-value table stored at %s", path)
+    logger.info("Tabla de p-values guardada en %s", path)
     return path
 
 def _available_numeric_metrics(df: pd.DataFrame) -> List[str]:
-    """Return the subset of metric candidates present in the dataset."""
+    """Devuelve una lista de métricas numéricas disponibles en el DataFrame."""
     present = [col for col in RPE_METRIC_CANDIDATES if col in df.columns]
     if present:
         return present
     return df.select_dtypes(include=[np.number]).columns.tolist()
 
-# MAIN EDA FUNCTION
+# FUNCIÓN PRINCIPAL DEL EDA
 def run_eda(
     dataset_path: str,
     output_dir: str,
@@ -143,7 +141,7 @@ def run_eda(
     os.makedirs(timestamped_dir, exist_ok=True)
     df = load_features_dataset(path=dataset_path)
     if df is None or df.empty:
-        raise ValueError("The features dataset could not be loaded or is empty.")
+        raise ValueError("El dataset de características no se pudo cargar o está vacío.")
 
     if sessions:
         filters = set(str(s) for s in sessions)
@@ -153,8 +151,8 @@ def run_eda(
                 mask |= df[col].astype(str).isin(filters)
         df = df[mask]
         if df.empty:
-            raise ValueError("No rows left after applying the session filters.")
-        logger.info("Dataset filtered to %d rows using sessions %s", len(df), sorted(filters))
+            raise ValueError("No quedan filas tras aplicar los filtros de sesión.")
+        logger.info("Dataset filtrado a %d filas usando sesiones %s", len(df), sorted(filters))
 
     metric_list = [m.strip() for m in metrics] if metrics else None
     available_metrics = _available_numeric_metrics(df)
@@ -203,7 +201,7 @@ def run_eda(
             for file_path in unique_files:
                 arcname = os.path.relpath(file_path, timestamped_dir) if file_path.startswith(timestamped_dir) else os.path.basename(file_path)
                 archive.write(file_path, arcname=arcname)
-        logger.info("Figures zipped into %s", zip_path)
+        logger.info("Figuras comprimidas en %s", zip_path)
         if clean_after_zip:
             for file_path in unique_files:
                 try:
@@ -213,54 +211,55 @@ def run_eda(
             try:
                 os.rmdir(timestamped_dir)
             except OSError:
-                logger.warning("Not able to remove directory %s", timestamped_dir)
+                logger.warning("No se pudo eliminar el directorio %s", timestamped_dir)
     else:
         zip_path = None
 
-    logger.info("EDA completed. Figures stored in %s", timestamped_dir)
+    logger.info("EDA completado. Figuras guardadas en %s", timestamped_dir)
     return zip_path
 
+# PARSEAR ARGUMENTOS
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="EDA for the sliding-window features dataset."
+        description="EDA del dataset de características por ventanas."
     )
     parser.add_argument(
         "--dataset",
         type=str,
         default=DEFAULT_DATASET,
-        help=f"Root path to the features dataset (default: {DEFAULT_DATASET}).",
+        help=f"Ruta al dataset de características (por defecto: {DEFAULT_DATASET}).",
     )
     parser.add_argument(
         "--output",
         type=str,
         default=DEFAULT_OUTPUT_DIR,
-        help=f"Directory to store generated figures (default: {DEFAULT_OUTPUT_DIR}).",
+        help=f"Directorio donde guardar las figuras (por defecto: {DEFAULT_OUTPUT_DIR}).",
     )
     parser.add_argument(
         "--session",
         nargs="+",
-        help="Optional list of session IDs/files/runners to filter the dataset.",
+        help="Lista opcional de sesiones/archivos/corredores para filtrar el dataset.",
     )
     parser.add_argument(
         "--metrics",
         nargs="+",
-        help="Optional list of metric columns to highlight (applies to histograms and RPE plots).",
+        help="Lista opcional de métricas a resaltar (aplica a gráficos y RPE).",
     )
     parser.add_argument(
         "--zip",
         nargs="?",
         const="auto",
         default=None,
-        help="Creates a ZIP with the generated figures. A filename can be specified.",
+        help="Crea un ZIP con las figuras generadas. Puede especificarse un nombre.",
     )
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Deletes the figures after creating the ZIP (only if --zip is used).",
+        help="Elimina las figuras tras crear el ZIP (solo si se usa --zip).",
     )
     return parser.parse_args()
 
-# MAIN ENTRY POINT
+# EJECUCIÓN PRINCIPAL
 if __name__ == "__main__":
     args = parse_args()
     try:
@@ -273,6 +272,6 @@ if __name__ == "__main__":
             clean_after_zip=args.clean,
         )
         if zip_path:
-            logger.info("EDA ZIP created at %s", zip_path)
+            logger.info("ZIP del EDA creado en %s", zip_path)
     except Exception as exc:
-        logger.error("EDA process failed: %s", exc)
+        logger.error("El proceso de EDA falló: %s", exc)

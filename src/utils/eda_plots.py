@@ -1,23 +1,23 @@
 """
-Reusable plotting utilities for the sliding-window dataset (EDA).
+Utilidades de gráficos reutilizables para el dataset por ventanas (EDA).
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS 
 from __future__ import annotations
 
 import os
 from typing import Dict, Iterable, List, Optional
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
+import matplotlib.pyplot as plt # type: ignore
+import numpy as np # type: ignore
+import pandas as pd # type: ignore
+import seaborn as sns # type: ignore
 
-# GLOBALS AND CONSTANTS
+# CONSTANTES GLOBALES
 AXIS_LABELS: Dict[str, str] = {
     "vtr_mean": "Velocidad translacional media",
     "hr_mean": "Frecuencia cardíaca media",
-    "fatigue_score": "Índice de cansancio",
+    "physical_fatigue_index": "Índice de cansancio físico",
     "jerk_std": "Desviación estándar del jerk",
     "reported_rpe": "RPE reportado",
     "session_id": "Identificador de sesión",
@@ -26,13 +26,13 @@ AXIS_LABELS: Dict[str, str] = {
     "start_s": "Tiempo (s)",
 }
 
-# FUNCTIONS
+# FUNCIONES DE GRÁFICOS
 def axis_label(name: str) -> str:
-    """Human-friendly axis label."""
+    """Obtiene una etiqueta legible para un nombre de variable dado."""
     return AXIS_LABELS.get(name, name)
 
 def safe_boxplot(df: pd.DataFrame, x: str, y: str, output_dir: str) -> Optional[str]:
-    """Generates a boxplot if both columns are available."""
+    """Genera un boxplot si ambas columnas existen."""
     if y not in df.columns or x not in df.columns:
         return None
     data = df[[x, y]].replace([np.inf, -np.inf], np.nan).dropna()
@@ -59,7 +59,7 @@ def safe_scatter(
     hue: Optional[str] = None,
     palette: str = "viridis",
 ) -> Optional[str]:
-    """Generates a scatter plot if both columns exist."""
+    """Genera un scatterplot con regresión si las columnas existen."""
     if x not in df.columns or y not in df.columns:
         return None
     data_cols = [x, y]
@@ -90,7 +90,7 @@ def plot_rpe_relationships(
     *,
     available_metrics: Iterable[str],
 ) -> List[str]:
-    """Boxplots of metrics vs RPE."""
+    """Genera boxplots de métricas seleccionadas frente a RPE reportado."""
     if "reported_rpe" not in df.columns:
         return []
     selected = list(metrics) if metrics else list(available_metrics)
@@ -103,7 +103,7 @@ def plot_rpe_relationships(
     return paths
 
 def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[str]:
-    """Specific scatter/box combinations for HR, jerk, and fatigue score vs RPE."""
+    """Gráficos especializados para relaciones clave entre métricas."""
     paths: List[str] = []
     saved = safe_scatter(
         df,
@@ -119,7 +119,7 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
         paths.append(saved)
     saved = safe_scatter(
         df,
-        x="fatigue_score",
+        x="physical_fatigue_index",
         y="reported_rpe",
         hue="session_id" if "session_id" in df.columns else None,
         output_dir=output_dir,
@@ -130,8 +130,8 @@ def plot_specialised_relationships(df: pd.DataFrame, output_dir: str) -> List[st
     return paths
 
 def plot_correlation_heatmap(df: pd.DataFrame, output_dir: str) -> Optional[str]:
-    """Correlation heatmap for a subset of key metrics."""
-    cols = ["hr_mean", "fatigue_score", "reported_rpe", "vtr_mean", "jerk_std"]
+    """Genera un mapa de calor de correlaciones entre métricas clave."""
+    cols = ["hr_mean", "spo2_mean", "acc_std", "physical_fatigue_index", "reported_rpe", "vtr_mean", "jerk_std"]
     subset = [c for c in cols if c in df.columns]
     if len(subset) < 2:
         return None
@@ -155,7 +155,7 @@ def plot_runner_facets(
     *,
     max_groups: int = 6,
 ) -> List[str]:
-    """Runner-based boxplots for select metrics."""
+    """Genera boxplots de métricas por corredor (top N corredores)."""
     if "runner_id" not in df.columns:
         return []
     runner_counts = df["runner_id"].value_counts().head(max_groups).index
@@ -185,17 +185,17 @@ def plot_runner_facets(
     return paths
 
 def plot_fatigue_levels(df: pd.DataFrame, output_dir: str) -> Optional[str]:
-    """Distribution of fatigue score grouped by discrete fatigue level."""
-    if "fatigue_level" not in df.columns or "fatigue_score" not in df.columns:
+    """Genera un boxplot del índice de cansancio físico por nivel de cansancio."""
+    if "fatigue_level" not in df.columns or "physical_fatigue_index" not in df.columns:
         return None
-    data = df[["fatigue_level", "fatigue_score"]].dropna()
+    data = df[["fatigue_level", "physical_fatigue_index"]].dropna()
     if data.empty:
         return None
     plt.figure(figsize=(6, 4))
-    sns.boxplot(data=data, x="fatigue_level", y="fatigue_score", palette="Set3")
-    plt.title("Índice de cansancio por nivel")
+    sns.boxplot(data=data, x="fatigue_level", y="physical_fatigue_index", palette="Set3")
+    plt.title("Índice de cansancio físico por nivel")
     plt.xlabel(axis_label("fatigue_level"))
-    plt.ylabel(axis_label("fatigue_score"))
+    plt.ylabel(axis_label("physical_fatigue_index"))
     plt.grid(alpha=0.3)
     plt.tight_layout()
     path = os.path.join(output_dir, "fatigue_level_boxplot.png")
