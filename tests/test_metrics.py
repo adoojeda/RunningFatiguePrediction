@@ -13,11 +13,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # IMPORTS DEL PROYECTO
-from src.utils.metrics_utils import compute_fatigue_score, derive_fatigue_references
+from src.utils.metrics_utils import compute_physical_fatigue_index, derive_fatigue_references
 
 # PRUEBAS DE MÉTRICAS
-def test_compute_fatigue_score_respects_weights():
-    """El cálculo del fatigue_score debe respetar los pesos dados."""
+def test_compute_physical_fatigue_index_respects_weights():
+    """El cálculo del physical_fatigue_index debe respetar los pesos dados."""
     metrics = {
         "hr_mean": 150,
         "spo2_mean": 95,
@@ -31,9 +31,9 @@ def test_compute_fatigue_score_respects_weights():
         "jerk_std_ref": 1.0,
     }
     weights = {"jerk": 0.4, "acc": 0.3, "hr": 0.2, "spo2": 0.1}
-    result = compute_fatigue_score(metrics.copy(), references=references, weights=weights, adaptive=False)
-    assert "fatigue_score" in result
-    assert 0.0 <= result["fatigue_score"] <= 1.0
+    result = compute_physical_fatigue_index(metrics.copy(), references=references, weights=weights, adaptive=False)
+    assert "physical_fatigue_index" in result
+    assert 0.0 <= result["physical_fatigue_index"] <= 1.0
 
 def test_derive_fatigue_references_uses_percentiles():
     """Las referencias de cansancio deben derivarse usando percentiles seguros."""

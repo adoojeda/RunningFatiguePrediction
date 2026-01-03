@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 from src.features.features_extraction import compute_window_features
 
 # PRUEBAS UNITARIAS
-def test_compute_window_features_includes_fatigue_score():
+def test_compute_window_features_includes_physical_fatigue_index():
     df_win = pd.DataFrame(
         {
             "relative_time": [0.0, 0.5, 1.0],
@@ -32,5 +32,5 @@ def test_compute_window_features_includes_fatigue_score():
     )
     refs = {"hr_max": 150, "spo2_min": 90, "acc_std_ref": 1.0, "jerk_std_ref": 1.0}
     features = compute_window_features(df_win, "file.parquet", "file.parquet", fatigue_refs=refs)
-    assert "fatigue_score" in features
-    assert 0.0 <= features["fatigue_score"] <= 1.0
+    assert "physical_fatigue_index" in features
+    assert 0.0 <= features["physical_fatigue_index"] <= 1.0

@@ -2,7 +2,7 @@
 Extracción de características por ventanas (etapa 4/5 del pipeline).
 
 - Genera ventanas solapadas (3 s y 50 % de solape por defecto) sobre sesiones enriched.
-- Calcula estadísticos robustos de aceleración, velocidad traslacional, jerk, HR, SpO₂ y fatigue_score.
+- Calcula estadísticos robustos de aceleración, velocidad traslacional, jerk, HR, SpO₂ y physical_fatigue_index.
 - Une características con metadatos de corredor/sesión y RPE.
 - Guarda el dataset consolidado en `data/results/`.
 
@@ -31,7 +31,7 @@ if PROJECT_ROOT not in sys.path:
 
 # LIBRERÍAS DEL PROYECTO
 from src.config import get_config
-from src.utils.metrics_utils import compute_fatigue_score, derive_fatigue_references
+from src.utils.metrics_utils import compute_physical_fatigue_index, derive_fatigue_references
 from src.utils.schemas import validate_dataframe
 from src.utils.window_stats import mad, skewness, kurtosis, safe_stats
 from src.utils.windowing import create_window_params, iter_windows, prepare_dataframe
@@ -161,14 +161,14 @@ def compute_window_features(
         metrics_payload["jerk_std"] = float(jerk_std)
 
     if metrics_payload:
-        score_dict = compute_fatigue_score(
+        score_dict = compute_physical_fatigue_index(
             metrics_payload.copy(),
             context="window",
             references=fatigue_refs,
         )
-        fatigue_score = score_dict.get("fatigue_score")
-        if fatigue_score is not None and np.isfinite(fatigue_score):
-            out["fatigue_score"] = fatigue_score
+        physical_fatigue_index = score_dict.get("physical_fatigue_index")
+        if physical_fatigue_index is not None and np.isfinite(physical_fatigue_index):
+            out["physical_fatigue_index"] = physical_fatigue_index
 
     return out
 
@@ -295,6 +295,15 @@ def run_feature_extraction(
         removed = before - len(df_feats)
         if removed > 0:
             logger.info("Se filtraron %d ventanas con jerk_std > %.2f", removed, threshold)
+
+    if "acc_std" in df_feats.columns:
+        threshold = df_feats["acc_std"].quantile(0.995)
+        before = len(df_feats)
+        df_feats = df_feats[df_feats["acc_std"] <= threshold]
+        removed = before - len(df_feats)
+        if removed > 0:
+            logger.info("Se filtraron %d ventanas con acc_std > %.2f", removed, threshold)
+
     df_out = df_feats.merge(df_map, on="file", how="left")
 
     missing_rpe = df_out["reported_rpe"].isna().sum() if "reported_rpe" in df_out.columns else len(df_out)

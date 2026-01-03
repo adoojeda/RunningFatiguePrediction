@@ -1,8 +1,8 @@
-"""Búsqueda de pesos del fatigue_score con Optuna usando el dataset por ventanas.
+"""Búsqueda de pesos del physical_fatigue_index con Optuna usando el dataset por ventanas.
 
 Pipeline
 --------
-1. Recalcular ``fatigue_score`` por ventana con pesos candidatos (jerk/acc/hr/spo2).
+1. Recalcular ``physical_fatigue_index`` por ventana con pesos candidatos (jerk/acc/hr/spo2).
 2. Entrenar un ``HistGradientBoostingRegressor`` ligero con ``GroupKFold``.
 3. Evaluar R² en un hold-out agrupado por ``runner_id`` y maximizarlo.
 4. Guardar la mejor combinación de pesos en ``--output-dir``.
@@ -38,7 +38,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # IMPORTS DEL PROYECTO
 from src.config import get_config
-from src.utils.metrics_utils import compute_fatigue_score
+from src.utils.metrics_utils import compute_physical_fatigue_index
 
 # CONFIGURACIÓN DE LOGGING
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -53,7 +53,7 @@ def load_dataset(path: Path) -> pd.DataFrame:
     return df
 
 def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[str, float]) -> pd.Series:
-    """Recalcula el fatigue_score para cada fila del DataFrame usando los pesos dados."""
+    """Recalcula el physical_fatigue_index para cada fila del DataFrame usando los pesos dados."""
     needed = ["hr_mean", "spo2_mean", "acc_std", "jerk_std"]
     missing = [c for c in needed if c not in df.columns]
     if missing:
@@ -66,13 +66,13 @@ def recompute_fatigue(df: pd.DataFrame, weights: Dict[str, float], refs: Dict[st
             "acc_std": float(row["acc_std"]) if np.isfinite(row["acc_std"]) else 0.0,
             "jerk_std": float(row["jerk_std"]) if np.isfinite(row["jerk_std"]) else 0.0,
         }
-        score_dict = compute_fatigue_score(
+        score_dict = compute_physical_fatigue_index(
             metrics_payload,
             context="window",
             references=refs,
             weights=weights,
         )
-        scores.append(score_dict.get("fatigue_score", np.nan))
+        scores.append(score_dict.get("physical_fatigue_index", np.nan))
     return pd.to_numeric(pd.Series(scores), errors="coerce")
 
 def train_eval(df: pd.DataFrame, target_col: str, group_col: str, seed: int) -> float:
@@ -120,9 +120,9 @@ def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, 
 
         df_copy = df.copy()
         df_target = df_copy.copy()
-        df_target["fatigue_score"] = recompute_fatigue(df_target, weights, refs)
-        df_target = df_target.dropna(subset=["fatigue_score"])
-        r2 = train_eval(df_target, target_col="fatigue_score", group_col=group_col, seed=seed)
+        df_target["physical_fatigue_index"] = recompute_fatigue(df_target, weights, refs)
+        df_target = df_target.dropna(subset=["physical_fatigue_index"])
+        r2 = train_eval(df_target, target_col="physical_fatigue_index", group_col=group_col, seed=seed)
         
         return -r2
 
@@ -130,7 +130,7 @@ def objective_factory(df: pd.DataFrame, refs: Dict[str, float], seed: int = 42, 
 
 # PARSER DE ARGUMENTOS
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Búsqueda de pesos del fatigue_score con Optuna.")
+    parser = argparse.ArgumentParser(description="Búsqueda de pesos del physical_fatigue_index con Optuna.")
     parser.add_argument(
         "--dataset",
         type=Path,

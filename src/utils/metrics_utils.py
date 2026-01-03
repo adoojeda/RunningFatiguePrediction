@@ -1,5 +1,5 @@
 """
-Funciones auxiliares para métricas biomecánicas/fisiológicas y fatigue_score.
+Funciones auxiliares para métricas biomecánicas/fisiológicas y physical_fatigue_index.
 """
 
 # LIBRERÍAS ESTÁNDAR
@@ -84,7 +84,7 @@ def derive_fatigue_references(df: pd.DataFrame) -> Dict[str, float]:
     return refs
 
 # CÁLCULO DEL ÍNDICE DE CANSANCIO
-def compute_fatigue_score(
+def compute_physical_fatigue_index(
     metrics: Dict[str, float],
     *,
     context: str = "session",
@@ -92,9 +92,9 @@ def compute_fatigue_score(
     weights: Optional[Dict[str, float]] = None,
     adaptive: bool = True,
 ) -> Dict[str, float]:
-    """Calcula el fatigue_score basado en las métricas y referencias dadas."""
+    """Calcula el physical_fatigue_index basado en las métricas y referencias dadas."""
     if not metrics:
-        return {"fatigue_score": np.nan}
+        return {"physical_fatigue_index": np.nan}
 
     if context not in {"session", "window"}:
         raise ValueError(
@@ -148,11 +148,11 @@ def compute_fatigue_score(
         + weight_cfg["spo2"] * norm_spo2
     )
 
-    metrics["fatigue_score"] = round(float(fatigue), 3)
+    metrics["physical_fatigue_index"] = round(float(fatigue), 3)
     return metrics
 
 __all__ = [
     "compute_session_metrics",
     "derive_fatigue_references",
-    "compute_fatigue_score",
+    "compute_physical_fatigue_index",
 ]

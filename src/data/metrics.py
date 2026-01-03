@@ -1,7 +1,7 @@
 """
 Métricas biomecánicas y fisiológicas (etapa 3/5 del pipeline):
 - Filtro pasa-alto + integración de aceleraciones centradas → velocidad traslacional (vtr).
-- Cálculo de jerk (derivada de la aceleración) y estimación del fatigue_score.
+- Cálculo de jerk (derivada de la aceleración) y estimación del physical_fatigue_index.
 - Actualiza las sesiones enriquecidas para su uso en etapas posteriores.
 
 Ejemplo:
@@ -43,7 +43,7 @@ from src.utils.kinematics_utils import (
 from src.utils.metrics_utils import (
     compute_session_metrics,
     derive_fatigue_references,
-    compute_fatigue_score,
+    compute_physical_fatigue_index,
 )
 from src.utils.schemas import validate_dataframe
 
@@ -71,7 +71,7 @@ class MetricsError(Exception):
 class SessionResult:
     """Resumen de una sesión procesada."""
     file: str
-    fatigue_score: float
+    physical_fatigue_index: float
     metrics: Dict[str, float]
 
 # UTILIDADES
@@ -147,7 +147,7 @@ def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
 
         session_metrics = compute_session_metrics(df)
         references = derive_fatigue_references(df)
-        session_metrics = compute_fatigue_score(
+        session_metrics = compute_physical_fatigue_index(
             session_metrics,
             context="session",
             references=references,
@@ -155,15 +155,15 @@ def process_session(path: str, *, allow_save: bool) -> Optional[SessionResult]:
         if allow_save:
             _save_enriched(df, path)
 
-        fatigue_score = session_metrics.get("fatigue_score", np.nan)
+        physical_fatigue_index = session_metrics.get("physical_fatigue_index", np.nan)
         logger.info(
-            "Sesión %s -> fatigue_score=%.3f",
+            "Sesión %s -> physical_fatigue_index=%.3f",
             os.path.basename(path),
-            fatigue_score,
+            physical_fatigue_index,
         )
         return SessionResult(
             file=os.path.basename(path),
-            fatigue_score=float(fatigue_score) if np.isfinite(fatigue_score) else np.nan,
+            physical_fatigue_index=float(physical_fatigue_index) if np.isfinite(physical_fatigue_index) else np.nan,
             metrics=session_metrics,
         )
 
@@ -200,7 +200,7 @@ def process_all_sessions(
 # INTERFAZ DE LÍNEA DE COMANDOS
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Calcula métricas biomecánicas y fatigue_score."
+        description="Calcula métricas biomecánicas y physical_fatigue_index."
     )
     parser.add_argument(
         "--input-dir",
