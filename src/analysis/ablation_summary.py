@@ -1,15 +1,15 @@
 """
-Ablation results summary.
+Resumen de resultados de ablaciones.
 
-Example:
+Ejemplo:
     python src/analysis/ablation_summary.py --ablation-dir data/results/modeling/ablation
 
-Scans subdirectories under data/results/modeling/ablation/<tag>,
-combines their summary.csv files, and if a baseline exists, computes
-metric deltas relative to it.
+Recorre subdirectorios bajo data/results/modeling/ablation/<tag>,
+combina los archivos summary.csv más recientes en un solo CSV, y calcula deltas
+respecto a la ejecución baseline.
 """
 
-# STANDARD LIBRARIES
+# LIBRERÍAS 
 from __future__ import annotations
 
 import argparse
@@ -17,27 +17,27 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-import pandas as pd
+import pandas as pd # type: ignore
 
-# LOGGING CONFIGURATION
+# CONFIGURACIÓN DE LOGGING
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# PROJECT CONFIGURATION
+# CONFIGURACIÓN DEL PROYECTO
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ABLATION_DIR = PROJECT_ROOT / "data" / "results" / "modeling" / "ablation"
 
-# ARGUMENT PARSING
+# PARSEO DE ARGUMENTOS
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generates a combined summary of ablation experiments.")
-    parser.add_argument("--ablation-dir", type=Path, default=DEFAULT_ABLATION_DIR, help="Base directory with ablation runs.")
-    parser.add_argument("--output", type=Path, default=None, help="Path for the combined CSV (optional).")
-    parser.add_argument("--deltas-output", type=Path, default=None, help="Path for the baseline delta CSV (optional).")
+    parser = argparse.ArgumentParser(description="Genera un resumen combinado de las ablaciones.")
+    parser.add_argument("--ablation-dir", type=Path, default=DEFAULT_ABLATION_DIR, help="Directorio base con ejecuciones de ablación.")
+    parser.add_argument("--output", type=Path, default=None, help="Ruta del CSV combinado (opcional).")
+    parser.add_argument("--deltas-output", type=Path, default=None, help="Ruta del CSV de deltas vs baseline (opcional).")
     return parser.parse_args()
 
-# DATA COLLECTION
+# RECOGIDA DE SUMMARYS
 def collect_summary(tag_dir: Path) -> Optional[pd.DataFrame]:
-    """Collects the most recent summary.csv from the given tag directory."""
+    """Recoge el summary.csv más reciente en un directorio de etiqueta."""
     if not tag_dir.exists():
         return None
     experiment_dirs = sorted([d for d in tag_dir.iterdir() if d.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
@@ -49,32 +49,32 @@ def collect_summary(tag_dir: Path) -> Optional[pd.DataFrame]:
             return df
     return None
 
-# MAIN FUNCTION
+# FUNCIÓN PRINCIPAL
 def main() -> None:
     args = parse_args()
     if not args.ablation_dir.exists():
-        raise FileNotFoundError(f"Ablation directory not found: {args.ablation_dir}")
+        raise FileNotFoundError(f"No se encontró el directorio de ablaciones: {args.ablation_dir}")
 
     combined: List[pd.DataFrame] = []
     for tag_dir in sorted([d for d in args.ablation_dir.iterdir() if d.is_dir()]):
         df = collect_summary(tag_dir)
         if df is None:
-            logger.warning("summary.csv not found in %s", tag_dir)
+            logger.warning("summary.csv no encontrado en %s", tag_dir)
             continue
         df["block_tag"] = tag_dir.name
         combined.append(df)
 
     if not combined:
-        raise RuntimeError("No ablation results were found.")
+        raise RuntimeError("No se encontraron resultados de ablación.")
 
     combined_df = pd.concat(combined, ignore_index=True)
     combined_df_path = args.output or (args.ablation_dir / "ablation_summary.csv")
     combined_df.to_csv(combined_df_path, index=False)
-    logger.info("Combined summary stored at %s", combined_df_path)
+    logger.info("Resumen combinado guardado en %s", combined_df_path)
 
     baseline_df = combined_df[combined_df["block_tag"] == "baseline"]
     if baseline_df.empty:
-        logger.warning("Baseline not found; skipping deltas.")
+        logger.warning("Baseline no encontrado; se omiten los deltas.")
         return
 
     deltas: List[pd.DataFrame] = []
@@ -99,10 +99,10 @@ def main() -> None:
         deltas_df = pd.concat(deltas, ignore_index=True)
         deltas_path = args.deltas_output or (args.ablation_dir / "ablation_deltas.csv")
         deltas_df.to_csv(deltas_path, index=False)
-        logger.info("Baseline deltas stored at %s", deltas_path)
+        logger.info("Deltas respecto a baseline guardados en %s", deltas_path)
     else:
-        logger.warning("Could not compute deltas; check baseline and additional experiments.")
+        logger.warning("No se pudieron calcular deltas; revisa baseline y otras ejecuciones.")
 
-# ENTRY POINT
+# EJECUCIÓN DEL SCRIPT
 if __name__ == "__main__":
     main()
