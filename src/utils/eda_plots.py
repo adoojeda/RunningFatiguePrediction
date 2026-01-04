@@ -2,7 +2,7 @@
 Utilidades de gráficos reutilizables para el dataset por ventanas (EDA).
 """
 
-# LIBRERÍAS 
+# LIBRERÍAS ESTÁNDAR
 from __future__ import annotations
 
 import os
@@ -16,9 +16,15 @@ import seaborn as sns # type: ignore
 # CONSTANTES GLOBALES
 AXIS_LABELS: Dict[str, str] = {
     "vtr_mean": "Velocidad translacional media",
-    "hr_mean": "Frecuencia cardíaca media",
+    "hr_mean": "FC media",
+    "spo2_mean": "SpO₂ media",
+    "acc_mean": "Aceleración media",
+    "acc_std": "DE de aceleración",
+    "acc_mag_mad": "Desviación absoluta mediana de aceleración",
+    "acc_mag_skew": "Asimetría de aceleración",
+    "acc_mag_kurt": "Curtosis de aceleración",
     "physical_fatigue_index": "Índice de cansancio físico",
-    "jerk_std": "Desviación estándar del jerk",
+    "jerk_std": "DE del jerk",
     "reported_rpe": "RPE reportado",
     "session_id": "Identificador de sesión",
     "runner_id": "Identificador de corredor",
@@ -72,6 +78,7 @@ def safe_scatter(
     hue_arg = hue if hue and hue in data.columns else None
     sns.scatterplot(x=x, y=y, hue=hue_arg, data=data, palette=palette, alpha=0.6)
     sns.regplot(x=x, y=y, data=data, scatter=False, color="black", ci=None)
+    plt.title(f"{axis_label(y)} frente a {axis_label(x)}")
     plt.xlabel(axis_label(x))
     plt.ylabel(axis_label(y))
     plt.grid(alpha=0.3)
@@ -140,6 +147,8 @@ def plot_correlation_heatmap(df: pd.DataFrame, output_dir: str) -> Optional[str]
         return None
     corr = data.corr()
     plt.figure(figsize=(6, 5))
+    corr.index = [axis_label(col) for col in corr.index]
+    corr.columns = [axis_label(col) for col in corr.columns]
     sns.heatmap(corr, annot=True, cmap="RdBu_r", center=0, fmt=".2f")
     plt.title("Mapa de calor de correlaciones")
     path = os.path.join(output_dir, "heatmap_correlations.png")
@@ -174,7 +183,7 @@ def plot_runner_facets(
             palette="Set2",
         )
         plt.title(f"{axis_label(metric)} por corredor (top {len(runner_counts)})")
-        plt.xlabel("Corredor (subset)")
+        plt.xlabel("Corredor (subconjunto)")
         plt.ylabel(axis_label(metric))
         plt.xticks(rotation=45)
         plt.tight_layout()

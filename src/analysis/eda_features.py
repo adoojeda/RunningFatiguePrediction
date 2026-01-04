@@ -66,18 +66,21 @@ RPE_METRIC_CANDIDATES = [
     "spo2_mean",
 ]
 
-# PARES PARA CÁLCULO DE P-VALUES
+HEATMAP_COLS: List[str] = [
+    "hr_mean",
+    "spo2_mean",
+    "acc_std",
+    "physical_fatigue_index",
+    "reported_rpe",
+    "vtr_mean",
+    "jerk_std",
+]
+
+# PARES PARA CÁLCULO DE P-VALUES (mismas variables del heatmap)
 P_VALUE_PAIRS: List[tuple[str, str]] = [
-    ("hr_mean", "physical_fatigue_index"),
-    ("hr_mean", "reported_rpe"),
-    ("hr_mean", "vtr_mean"),
-    ("hr_mean", "jerk_std"),
-    ("physical_fatigue_index", "reported_rpe"),
-    ("physical_fatigue_index", "vtr_mean"),
-    ("physical_fatigue_index", "jerk_std"),
-    ("reported_rpe", "vtr_mean"),
-    ("reported_rpe", "jerk_std"),
-    ("vtr_mean", "jerk_std"),
+    (HEATMAP_COLS[i], HEATMAP_COLS[j])
+    for i in range(len(HEATMAP_COLS))
+    for j in range(i + 1, len(HEATMAP_COLS))
 ]
 
 # CÁLCULO DE P-VALUES
