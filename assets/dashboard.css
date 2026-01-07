@@ -1,0 +1,69 @@
+:root {
+  --bg: #f6f2ea;
+  --card: #ffffff;
+  --text: #141414;
+  --muted: #5d5d5d;
+  --accent: #1f6f8b;
+  --accent-2: #e76f51;
+  --border: #e3ddd3;
+}
+
+body {
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+}
+
+.card,
+.alert {
+  background-color: var(--card) !important;
+  border-color: var(--border) !important;
+}
+
+.alert-info {
+  border-left: 4px solid var(--accent) !important;
+}
+
+.alert-warning {
+  border-left: 4px solid var(--accent-2) !important;
+}
+
+.nav-tabs .nav-link {
+  color: var(--muted) !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  padding: 6px 10px !important;
+}
+
+.nav-tabs .nav-link.active {
+  color: var(--text) !important;
+  background-color: var(--card) !important;
+  border-color: var(--border) var(--border) var(--card) !important;
+}
+
+.dash-dropdown .Select-control,
+.dash-dropdown .Select-menu-outer,
+.Select-control {
+  background-color: var(--card) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+
+.dash-dropdown .Select-placeholder,
+.dash-dropdown .Select-value-label,
+.Select-placeholder,
+.Select-value-label {
+  color: var(--text) !important;
+}
+
+.dash-dropdown .Select-arrow-zone,
+.dash-dropdown .Select-clear-zone {
+  color: var(--muted) !important;
+}
+
+.dash-dropdown .Select-menu-outer {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08) !important;
+}
+
+label {
+  color: var(--text) !important;
+}
