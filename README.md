@@ -1,62 +1,142 @@
-# Pipeline de Predicción de Cansancio en Running
+# RunningFatiguePrediction – Sistema de estimación del cansancio físico en corredores
 
-Este repositorio procesa señales capturadas por relojes inteligentes para generar conjuntos de datos listos para modelado y análisis.
+Este repositorio implementa el pipeline completo para procesar señales de Apple Watch, generar datasets por ventanas y entrenar modelos capaces de estimar el cansancio físico en corredores. Incluye scripts reproducibles, análisis exploratorio, experimentos de modelado, inferencia y un dashboard interactivo.
 
-## Pipeline end to end
+---
 
-1. **Preprocesado** – `python src/data/preprocess.py`
-   - entrada: `data/raw/*.csv`
-   - salida: `data/processed/clean_*.parquet`
-   - limpia marcas temporales, interpola FC/SpO₂ y elimina outliers evidentes
-   - **Mapa de columnas del CSV bruto**
+## 🧭 Flujo general (end‑to‑end)
 
-     | Posición | Descripción            | Nombre asignado |
-     |---------:|------------------------|-----------------|
-     | 1        | Marca temporal absoluta| `time`          |
-     | 2        | Aceleración X          | `acc_x`         |
-     | 3        | Aceleración Y          | `acc_y`         |
-     | 4        | Aceleración Z          | `acc_z`         |
-     | 5        | Gravedad X             | `grav_x`        |
-     | 6        | Gravedad Y             | `grav_y`        |
-     | 7        | Gravedad Z             | `grav_z`        |
-     | 8        | Rotación X             | `rot_x`         |
-     | 9        | Rotación Y             | `rot_y`         |
-     | 10       | Rotación Z             | `rot_z`         |
-     | 11       | Roll                   | `roll`          |
-     | 12       | Pitch                  | `pitch`         |
-     | 13       | Yaw                    | `yaw`           |
-     | 14       | Frecuencia cardíaca    | `hr`            |
-     | 15       | Saturación de oxígeno  | `spo2`          |
+1. **Preprocesado**  
+   ```bash
+   python src/data/preprocess.py
+   ```
+   - Entrada: `data/raw/*.csv`
+   - Salida: `data/processed/clean_*.parquet`
+   - Limpia marcas temporales, interpola FC/SpO₂, filtra valores fuera de rango y corrige inconsistencias.
 
-2. **Enriquecimiento cinemático** – `python src/features/kinematics.py`
-   - entrada: `data/processed/clean_*.parquet`
-   - salida: `data/enriched/enriched_*.parquet`
-   - centra aceleraciones y calcula magnitudes dinámicas
+2. **Enriquecimiento cinemático**  
+   ```bash
+   python src/features/kinematics.py
+   ```
+   - Entrada: `data/processed/clean_*.parquet`
+   - Salida: `data/enriched/enriched_*.parquet`
+   - Calcula aceleración centrada, magnitudes, jerk y velocidad traslacional.
 
-3. **Métricas de sesión** – `python src/data/metrics.py`
-   - entrada: `data/enriched/enriched_*.parquet`
-   - salida: `data/enriched/enriched_*.parquet` (actualiza columnas)
-   - deriva velocidad traslacional y jerk; prepara referencias internas para el índice de cansancio físico
+3. **Métricas de sesión**  
+   ```bash
+   python src/data/metrics.py
+   ```
+   - Entrada/Salida: `data/enriched/enriched_*.parquet`
+   - Añade métricas necesarias para el índice de cansancio físico.
 
-4. **Extracción de características** – `python src/features/features_extraction.py`
-   - entrada: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
-   - salida: `data/results/features_dataset.parquet`
-   - construye ventanas deslizantes de 3 s (50 % de solape) alineadas con los objetivos de estimar cansancio/RPE
+4. **Extracción de características**  
+   ```bash
+   python src/features/features_extraction.py
+   ```
+   - Entrada: `data/enriched/enriched_*.parquet` + `data/raw/rpe_file_mapping.csv`
+   - Salida: `data/results/features_dataset.parquet`
+   - Ventanas de 3 s con solape del 50 %.
 
-5. **Análisis y dashboards** – scripts en `src/analysis/` y `src/app/`
-  - generan figuras de EDA (`eda_features.py`), reportes de ablaciones (`ablation_summary.py`) y vistas interactivas (`dashboard.py`)
+5. **Modelado**  
+   ```bash
+   python src/models/run_experiments.py \
+     --dataset data/results/features_dataset.parquet \
+     --target physical_fatigue_index \
+     --group runner_id \
+     --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost
+   ```
 
-## Conjunto de características utilizado en el modelado
+6. **Ablaciones**  
+   ```bash
+   python src/models/run_ablation.py \
+     --dataset data/results/features_dataset.parquet \
+     --target physical_fatigue_index \
+     --group runner_id \
+     --exclude-blocks orientation
+   ```
 
-Tras auditar cobertura, varianza y redundancia, la etapa de modelado consume una lista revisada de atributos por ventana: fisiología (`hr_mean`, `spo2_mean`), aceleraciones centradas por eje (`acc_*centered_*`), magnitudes (`acc_*`), velocidad traslacional (`vtr_*`), jerk (`jerk_*`) y orientación/balance (`roll_*`, `yaw_*`, `grav_*`). La whitelist vive en los scripts de modelado (p. ej., `src/models/run_experiments.py`) y se aplica antes del entrenamiento para garantizar reproducibilidad.
+7. **Inferencia**  
+   ```bash
+   python src/models/run_inference.py --help
+   ```
+   - Reproduce el pipeline sobre un `enriched_*.parquet`.
 
-## Flujo de modelado
+---
 
-- **Experimentos**: `python src/models/run_experiments.py --dataset data/results/features_dataset.parquet --target physical_fatigue_index --group runner_id --models gradient_boosting random_forest hist_gradient_boosting elasticnet xgboost catboost [--fast-grid opcional]`
-  - ejecuta experimentos agrupados por corredor, lanza GridSearchCV para cada modelo y guarda métricas, predicciones, hashes y modelos serializados en `data/results/modeling/experiments/`.
-- **Ablaciones de características**: `python src/models/run_ablation.py --dataset data/results/features_dataset.parquet --target physical_fatigue_index --group runner_id --exclude-blocks orientacion fisiologia`
-  - genera versiones del experimento eliminando bloques de señales (fisiología, orientación, jerk, etc.) y guarda los resultados en `data/results/modeling/ablation/<bloques>/`.
+## 🧠 Índice de cansancio físico
 
-## Flujo de inferencia
+El objetivo principal es un índice continuo (0–1) que integra:
 
-`src/models/run_inference.py` (también disponible en `notebooks/inference_demo.ipynb` y en la pestaña de inferencia del dashboard) permite reproducir un pipeline entrenado sobre cualquier `enriched_*.parquet` y emitir predicciones por ventana. El resultado es idéntico al evaluado durante el entrenamiento y se visualiza en el panel Dash para inspeccionar el estado del corredor durante la sesión.
+- Variabilidad del *jerk*  
+- Variabilidad de la aceleración  
+- Frecuencia cardíaca  
+- Saturación de oxígeno  
+
+Los pesos se ajustan mediante Optuna en `optimize_fatigue_weights.py`.
+
+---
+
+## 📊 Modelado y resultados
+
+- Métricas: **MAE**, **RMSE**, **R²**
+- Validación agrupada por corredor (GroupShuffleSplit + GroupKFold)
+- Mejores resultados: modelos de **boosting**
+
+Los resultados se guardan en:
+```
+data/results/modeling/experiments/runner_id_YYYYMMDD_HHMMSS/
+```
+
+---
+
+## 🧪 Análisis exploratorio y auditoría
+
+Scripts disponibles en `src/analysis/`:
+
+- `eda_features.py` → figuras y correlaciones  
+- `feature_audit.py` → cobertura, redundancia y ranking de features  
+- `ablation_summary.py` → resumen de ablaciones  
+
+---
+
+## 🖥️ Dashboard interactivo
+
+Panel en Dash para explorar señales y ejecutar inferencia:
+
+```bash
+python src/app/dashboard.py
+```
+
+- Visualización por pestañas (aceleración, jerk, velocidad, orientación, FC, SpO₂…)
+- Inferencia ventana a ventana con métricas y resumen
+
+---
+
+## 📁 Estructura principal
+
+```
+src/
+  data/        # Preprocesado y métricas
+  features/    # Enriquecimiento y extracción de ventanas
+  models/      # Entrenamiento, ablaciones, inferencia
+  analysis/    # EDA y auditorías
+  app/         # Dashboard
+notebooks/     # Análisis interactivo
+data/          # Raw, processed, enriched, results
+```
+
+---
+
+## ✅ Requisitos
+
+- Python 3.9+
+- Conda/venv recomendado
+- Librerías: numpy, pandas, scikit-learn, optuna, plotly, seaborn, etc.
+
+---
+
+## 🔮 Trabajo futuro
+
+- Modelos temporales
+- Personalización por corredor
+- Inferencia en el dispositivo
